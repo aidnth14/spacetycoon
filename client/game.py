@@ -155,6 +155,29 @@ def _build_fonts(S):
     S.code_font = pygame.font.SysFont(cfg.MONO_FONTS, 52, bold=True)
 
 
+def update_menu_layout(S):
+    if not hasattr(S, "menu_page"):
+        S.menu_page = "root"
+    if S.menu_page == "root":
+        S.MENU_FOCUS = [S.play_btn, S.settings_btn, S.quit_btn]
+    elif S.menu_page == "play":
+        S.MENU_FOCUS = [S.menu_local_btn, S.menu_online_btn, S.menu_back_btn]
+    elif S.menu_page == "online":
+        S.MENU_FOCUS = [S.menu_join_btn, S.menu_host_btn, S.menu_back_btn]
+    elif S.menu_page == "host":
+        S.MENU_FOCUS = [S.host_local_coop_btn, S.host_online_coop_btn, S.menu_back_btn]
+    else:
+        S.menu_page = "root"
+        S.MENU_FOCUS = [S.play_btn, S.settings_btn, S.quit_btn]
+        
+    S.focus_index = 0
+    MW, bh, gap = 260, 34, 6
+    MX = 44
+    y0 = cfg.HEIGHT - len(S.MENU_FOCUS) * (bh + gap) - 40
+    for i, btn in enumerate(S.MENU_FOCUS):
+        btn.rect = pygame.Rect(MX, y0 + i * (bh + gap), MW, bh)
+
+
 def _build_ui(S):
     # server address lives on the JOIN / HOST setup panels
     S.addr_input = TextInput(LEFT_X, CARD_Y + 56, cfg.CARD_W - PAD * 2, 36,
@@ -173,18 +196,30 @@ def _build_ui(S):
     ]
     S.setup_confirm_btn = Button(CENTER_X - 130, CARD_Y + 340, 260, 46, "CONFIRM")
 
-    # single flat main menu — one screen, one choice
-    MW = 320
-    MX = CENTER_X - MW // 2
-    y0, bh, gap = CARD_Y + 36, 42, 10
-    def _mb(i, label):
-        return Button(MX, y0 + i * (bh + gap), MW, bh, label)
-    S.single_btn = _mb(0, "SINGLE PLAYER")
-    S.local_btn = _mb(1, "LOCAL CO-OP")
-    S.join_btn = _mb(2, "JOIN GAME")
-    S.host_btn = _mb(3, "HOST GAME")
-    S.settings_btn = _mb(4, "SETTINGS")
-    S.quit_btn = _mb(5, "QUIT")
+    def _mb(label):
+        return Button(0, 0, 260, 34, label)
+    
+    S.play_btn = _mb("PLAY")
+    S.settings_btn = _mb("SETTINGS")
+    S.quit_btn = _mb("QUIT")
+    S.menu_local_btn = _mb("LOCAL")
+    S.menu_online_btn = _mb("ONLINE")
+    S.menu_join_btn = _mb("JOIN")
+    S.menu_host_btn = _mb("HOST")
+    S.host_local_coop_btn = _mb("LOCAL CO-OP")
+    S.host_online_coop_btn = _mb("ONLINE CO-OP")
+    S.menu_back_btn = _mb("BACK")
+
+    # in-world pause menu
+    PR = pygame.Rect(CENTER_X - 170, cfg.HEIGHT // 2 - 175, 340, 350)
+    S.pause_rect = PR
+    py0, pbh, pgap = PR.y + 88, 44, 12
+    def _pb(i, label):
+        return Button(CENTER_X - 120, py0 + i * (pbh + pgap), 240, pbh, label)
+    S.pause_resume_btn = _pb(0, "RESUME")
+    S.pause_help_btn = _pb(1, "HOW TO PLAY")
+    S.pause_settings_btn = _pb(2, "SETTINGS")
+    S.pause_quit_btn = _pb(3, "QUIT TO MENU")
 
     S.close_btn = IconButton(cfg.WIDTH - 42, 14, 30, kind="close")  # quits the app
     S.panel_x = IconButton(CARD.right - 42, CARD_Y + 12, 28, kind="close")  # closes current panel
@@ -207,8 +242,7 @@ def _build_ui(S):
     S.settings_close_btn = Button(SETTINGS_RECT.centerx - 80, SETTINGS_RECT.bottom - 52, 160, 40, "CLOSE")
     S.settings_x = IconButton(SETTINGS_RECT.right - 40, SETTINGS_RECT.y + 12, 26, kind="close")
 
-    S.MENU_FOCUS = [S.single_btn, S.local_btn, S.join_btn, S.host_btn,
-                    S.settings_btn, S.quit_btn]
+    update_menu_layout(S)
 
 
 def init(S):
@@ -216,6 +250,10 @@ def init(S):
     _build_fonts(S)
     _build_ui(S)
     S.starfield = Starfield(cfg.WIDTH, cfg.HEIGHT)
+    # a slowly drifting procedural world used as the menu backdrop
+    S.menu_iso = iso.Iso(seed=90210, scale=2, view=(cfg.WIDTH, cfg.HEIGHT))
+    S.vignette = ui.make_vignette(cfg.WIDTH, cfg.HEIGHT)
+    S.paused = False
 
     S.state = STATE_MENU
     S.room_code = ""
@@ -275,6 +313,11 @@ def rebuild(S):
     _build_ui(S)
     load_game_icons(S)
     S.starfield = Starfield(cfg.WIDTH, cfg.HEIGHT)
+    # backdrop world + vignette persist across reloads; create if this session
+    # predates them (first hot-reload after the feature was added)
+    if not hasattr(S, "menu_iso"):
+        S.menu_iso = iso.Iso(seed=90210, scale=2, view=(cfg.WIDTH, cfg.HEIGHT))
+    S.vignette = ui.make_vignette(cfg.WIDTH, cfg.HEIGHT)
     S.addr_input.value = vals["addr"]
     S.code_input.value = vals["code"]
     for inp, v in zip(S.name_inputs, vals["names"]):
@@ -287,16 +330,47 @@ def rebuild(S):
 
 
 # --- actions ---
+def update_menu_bg(S, dt):
+    """Slowly pan the backdrop world so the menu feels alive."""
+    S.menu_iso.cam_x += 15 * dt
+    S.menu_iso.cam_y += 7.5 * dt
+
+
 def activate_focused(S):
     widget = S.MENU_FOCUS[S.focus_index]
-    if widget is S.settings_btn:
+    if widget is getattr(S, "settings_btn", None):
         return "settings"
-    elif widget is S.quit_btn:
+    elif widget is getattr(S, "help_btn", None):
+        return "help"
+    elif widget is getattr(S, "quit_btn", None):
         return "quit"
-    for btn, mode in ((S.single_btn, "single"), (S.local_btn, "local"),
-                      (S.join_btn, "join"), (S.host_btn, "host")):
-        if widget is btn:
-            go_setup(S, mode)
+    
+    if widget is getattr(S, "play_btn", None):
+        S.menu_page = "play"
+        update_menu_layout(S)
+    elif widget is getattr(S, "menu_local_btn", None):
+        go_setup(S, "single")
+    elif widget is getattr(S, "menu_online_btn", None):
+        S.menu_page = "online"
+        update_menu_layout(S)
+    elif widget is getattr(S, "menu_join_btn", None):
+        go_setup(S, "join")
+    elif widget is getattr(S, "menu_host_btn", None):
+        S.menu_page = "host"
+        update_menu_layout(S)
+    elif widget is getattr(S, "host_local_coop_btn", None):
+        go_setup(S, "local")
+    elif widget is getattr(S, "host_online_coop_btn", None):
+        go_setup(S, "host")
+    elif widget is getattr(S, "menu_back_btn", None):
+        if S.menu_page == "host":
+            S.menu_page = "online"
+        elif S.menu_page == "online":
+            S.menu_page = "play"
+        elif S.menu_page == "play":
+            S.menu_page = "root"
+        update_menu_layout(S)
+        
     return None
 
 
@@ -323,6 +397,8 @@ def go_setup(S, mode):
 def reset_to_menu(S, message):
     S.conn.close()
     S.state = STATE_MENU
+    S.menu_page = "root"
+    update_menu_layout(S)
     S.status_msg = message
     S.last_rtt = None
     S.ping_count = S.pong_count = 0
@@ -627,25 +703,35 @@ KEYBINDS = [
 ]
 
 
+HELP_INTRO = ("Explore an endless, procedurally-generated isometric world. Walk the "
+              "terrain, hop over rocks, and reshape the map on the fly — solo, in "
+              "same-screen co-op, or online with a friend via a room code.")
+
+
 def keybinds_rect():
-    w, h = 500, 96 + len(KEYBINDS) * 30
+    w, h = 520, 158 + len(KEYBINDS) * 30
     return pygame.Rect(cfg.WIDTH // 2 - w // 2, cfg.HEIGHT // 2 - h // 2, w, h)
 
 
 def draw_keybinds(S, now):
     screen = S.screen
     overlay = pygame.Surface((cfg.WIDTH, cfg.HEIGHT), pygame.SRCALPHA)
-    overlay.fill((0, 0, 0, 150))
+    overlay.fill((0, 0, 0, 160))
     screen.blit(overlay, (0, 0))
     rect = keybinds_rect()
-    draw_card(screen, rect)
+    # removed draw_card(screen, rect)
     icon = S.uicons.get("menu")
     tx = rect.x + 28
     if icon:
         screen.blit(icon, (rect.x + 22, rect.y + 20)); tx = rect.x + 52
-    draw_text(screen, "KEYBINDS", S.big_font, tx, rect.y + 20, cfg.GOLD)
-    draw_divider(screen, rect.x + 24, rect.y + 58, rect.w - 48)
-    y = rect.y + 74
+    draw_text(screen, "HOW TO PLAY", S.big_font, tx, rect.y + 20, cfg.GOLD)
+    # intro / goal blurb
+    ih = draw_wrapped_text(screen, HELP_INTRO, S.small_font, rect.y + 58,
+                           rect.w - 56, cfg.MUTED, line_gap=3)
+    draw_text(screen, "CONTROLS", S.small_font, rect.x + 28, rect.y + 62 + ih, cfg.GOLD_DIM)
+    div_y = rect.y + 82 + ih
+    draw_divider(screen, rect.x + 24, div_y, rect.w - 48)
+    y = div_y + 14
     for action, keylabel, glyph, pad in KEYBINDS:
         draw_text(screen, action, S.font, rect.x + 28, y, cfg.WHITE)
         # right-aligned: [pad icon] [glyph] key-chip
@@ -665,6 +751,28 @@ def draw_keybinds(S, now):
             rx -= 24; screen.blit(S.uicons[glyph], (rx, y - 1))
         y += 30
     draw_text(screen, "F1 / Esc to close", S.small_font, 0, rect.bottom - 26,
+              cfg.GOLD_FAINT, center_x=rect.centerx)
+
+
+def draw_pause(S, now):
+    """In-world pause overlay: dims the game and offers resume / help /
+    settings / quit."""
+    screen = S.screen
+    overlay = pygame.Surface((cfg.WIDTH, cfg.HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 150))
+    screen.blit(overlay, (0, 0))
+    rect = S.pause_rect
+    # removed draw_card(screen, rect)
+    draw_glow_text(screen, "PAUSED", S.big_font, 0, rect.y + 26, cfg.GOLD, cfg.GOLD,
+                   center_x=rect.centerx)
+    sub = S.lobby_name or ("ROOM " + S.room_code if S.room_code else "")
+    if sub:
+        draw_text(screen, sub[:34], S.small_font, 0, rect.y + 58, cfg.GOLD_DIM,
+                  center_x=rect.centerx)
+    draw_divider(screen, rect.x + 28, rect.y + 78, rect.w - 56)
+    for btn in (S.pause_resume_btn, S.pause_help_btn, S.pause_settings_btn, S.pause_quit_btn):
+        btn.draw(screen, S.font)
+    draw_text(screen, "Esc to resume", S.small_font, 0, rect.bottom - 26,
               cfg.GOLD_FAINT, center_x=rect.centerx)
 
 
@@ -751,10 +859,21 @@ def frame(S, events, dt, now):
                     res = activate_focused(S)
                     if res == "settings":
                         S.show_settings = True
+                    elif res == "help":
+                        S.show_keys = True
                     elif res == "quit":
                         running = False
-            elif event.button == JOYSTICK_B and S.show_settings:
-                S.show_settings = False
+            elif event.button == JOYSTICK_B:
+                if S.show_settings:
+                    S.show_settings = False
+                elif S.state == STATE_MENU and getattr(S, "menu_page", "root") != "root":
+                    if S.menu_page == "host":
+                        S.menu_page = "online"
+                    elif S.menu_page == "online":
+                        S.menu_page = "play"
+                    elif S.menu_page == "play":
+                        S.menu_page = "root"
+                    update_menu_layout(S)
 
         if event.type in (pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN):
             S.using_controller = False
@@ -789,20 +908,61 @@ def frame(S, events, dt, now):
                 S.show_settings = False
             continue
 
+        # --- in-world pause menu (Esc toggles; overlays take Esc first) ---
+        if (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE
+                and S.state in (STATE_LOCAL, STATE_TEST)
+                and not S.show_settings and not S.show_keys):
+            S.paused = not getattr(S, "paused", False)
+            continue
+        if getattr(S, "paused", False) and S.state in (STATE_LOCAL, STATE_TEST):
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if S.pause_resume_btn.clicked(event.pos):
+                    S.paused = False
+                elif S.pause_help_btn.clicked(event.pos):
+                    S.show_keys = True
+                elif S.pause_settings_btn.clicked(event.pos):
+                    S.show_settings = True
+                elif S.pause_quit_btn.clicked(event.pos):
+                    S.paused = False
+                    go_back(S)
+            continue  # freeze all other in-world input while paused
+
+        # --- MAIN menu: keyboard nav (Up/Down + Enter) drives the cursor ---
+        if event.type == pygame.KEYDOWN and S.state == STATE_MENU:
+            if event.key in (pygame.K_DOWN, pygame.K_s):
+                S.focus_index = (S.focus_index + 1) % len(S.MENU_FOCUS)
+            elif event.key in (pygame.K_UP, pygame.K_w):
+                S.focus_index = (S.focus_index - 1) % len(S.MENU_FOCUS)
+            elif event.key == pygame.K_RETURN:
+                res = activate_focused(S)
+                if res == "settings":
+                    S.show_settings = True
+                elif res == "help":
+                    S.show_keys = True
+                elif res == "quit":
+                    running = False
+            elif event.key == pygame.K_ESCAPE and getattr(S, "menu_page", "root") != "root":
+                if S.menu_page == "host":
+                    S.menu_page = "online"
+                elif S.menu_page == "online":
+                    S.menu_page = "play"
+                elif S.menu_page == "play":
+                    S.menu_page = "root"
+                update_menu_layout(S)
+
         # --- MAIN menu: one flat screen ---
         if event.type == pygame.MOUSEBUTTONDOWN and S.state == STATE_MENU:
-            if S.single_btn.clicked(event.pos):
-                go_setup(S, "single")
-            elif S.local_btn.clicked(event.pos):
-                go_setup(S, "local")
-            elif S.join_btn.clicked(event.pos):
-                go_setup(S, "join")
-            elif S.host_btn.clicked(event.pos):
-                go_setup(S, "host")
-            elif S.settings_btn.clicked(event.pos):
-                S.show_settings = True
-            elif S.quit_btn.clicked(event.pos):
-                running = False
+            for i, btn in enumerate(S.MENU_FOCUS):
+                if btn.clicked(event.pos):
+                    S.focus_index = i
+                    res = activate_focused(S)
+                    if res == "settings":
+                        S.show_settings = True
+                    elif res == "help":
+                        S.show_keys = True
+                    elif res == "quit":
+                        running = False
+                    break
 
         # --- SETUP panel: per-mode fields, then confirm ---
         if event.type in (pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN) and S.state == STATE_SETUP:
@@ -877,9 +1037,11 @@ def frame(S, events, dt, now):
                 and not S.show_settings:
             zoom(S, 1 if event.y > 0 else -1)
 
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE and S.state != STATE_MENU:
+        if (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE
+                and S.state in (STATE_SETUP, STATE_WAIT)):
             go_back(S)
-        if event.type == pygame.JOYBUTTONDOWN and event.button == JOYSTICK_B and S.state != STATE_MENU:
+        if event.type == pygame.JOYBUTTONDOWN and event.button == JOYSTICK_B \
+                and S.state in (STATE_SETUP, STATE_WAIT):
             go_back(S)
 
     # --- keep the playlist cycling ---
@@ -950,7 +1112,7 @@ def frame(S, events, dt, now):
         prune_peers(S, now)
         # walk the shared map; WASD + arrows both drive your own avatar
         keys = pygame.key.get_pressed()
-        if not S.chat_open:
+        if not S.chat_open and not getattr(S, "paused", False):
             up = keys[pygame.K_w] or keys[pygame.K_UP]
             down = keys[pygame.K_s] or keys[pygame.K_DOWN]
             left = keys[pygame.K_a] or keys[pygame.K_LEFT]
@@ -986,9 +1148,10 @@ def frame(S, events, dt, now):
 
     if S.state == STATE_LOCAL:
         keys = pygame.key.get_pressed()
+        frozen = S.chat_open or getattr(S, "paused", False)
         for i, p in enumerate(S.local_players):
             _, up, down, left, right, _, _ = SCHEMES[i]
-            if S.chat_open:                       # single-player chat freezes movement
+            if frozen:                            # chat / pause freezes movement
                 iso_move(S, p, False, False, False, False, dt)
             else:
                 iso_move(S, p, keys[up], keys[down], keys[left], keys[right], dt)
@@ -997,22 +1160,41 @@ def frame(S, events, dt, now):
 
     # --- draw ---
     screen = S.screen
-    S.starfield.update(dt)
-    screen.fill(cfg.BG)
-    S.starfield.draw(screen)
-    draw_card(screen, CARD)
+    if S.state in (STATE_TEST, STATE_LOCAL):
+        screen.fill(cfg.BG)  # the world is drawn by each play-state branch below
+    else:
+        # menu-family: a slowly drifting procedural world as the backdrop
+        update_menu_bg(S, dt)
+        S.menu_iso.draw(screen)
+        dim = pygame.Surface((cfg.WIDTH, cfg.HEIGHT), pygame.SRCALPHA)
+        dim.fill((6, 8, 14, 155))
+        screen.blit(dim, (0, 0))
+        screen.blit(S.vignette, (0, 0))
+        if S.state != STATE_MENU:
+            pass # Removed card background to look like main lobby UI
 
     if S.state == STATE_MENU:
         draw_header(S, "Connectivity Tester")
-        for btn in (S.single_btn, S.local_btn, S.join_btn, S.host_btn):
-            btn.draw(screen, S.font)
-        S.settings_btn.draw(screen, S.font)
-        S.quit_btn.draw(screen, S.font)
-        if S.using_controller:
-            draw_focus_ring(screen, S.MENU_FOCUS[S.focus_index].rect)
+        # hovering a menu item selects it (keeps mouse + keyboard in sync)
+        mouse = pygame.mouse.get_pos()
+        for i, btn in enumerate(S.MENU_FOCUS):
+            if btn.rect.collidepoint(mouse):
+                S.focus_index = i
+                break
+        for i, btn in enumerate(S.MENU_FOCUS):
+            selected = (i == S.focus_index)
+            color = cfg.SAND_BRIGHT if selected else cfg.SAND
+            r = btn.rect
+            # drop shadow for legibility over the world
+            draw_text(screen, btn.label, S.body_font, r.x + 1, r.centery - 12 + 1,
+                      cfg.SAND_SHADOW)
+            w = draw_text(screen, btn.label, S.body_font, r.x, r.centery - 12, color)
+            if selected:  # cursor pointing at the current selection
+                px = r.x + w + 14 + int(2 * math.sin(now * 6))  # gentle nudge
+                draw_text(screen, "◄", S.body_font, px, r.centery - 12, cfg.SAND_BRIGHT)
         if S.status_msg:
-            draw_wrapped_text(screen, S.status_msg, S.font, CARD.bottom + 12,
-                              cfg.CARD_W - PAD * 2, cfg.RED, center_x=CENTER_X)
+            draw_wrapped_text(screen, S.status_msg, S.font, 126,
+                              cfg.WIDTH - 120, cfg.RED, center_x=CENTER_X)
 
     elif S.state == STATE_SETUP and S.setup_mode == "single":
         draw_header(S, "Single Player")
@@ -1125,14 +1307,18 @@ def frame(S, events, dt, now):
     if S.state not in (STATE_TEST, STATE_LOCAL):
         draw_footer(S)
     S.close_btn.draw(screen)
-    if S.state != STATE_MENU and not S.show_settings:
+    if S.state != STATE_MENU and not S.show_settings and not getattr(S, "paused", False):
         S.panel_x.draw(screen)
+
+    if getattr(S, "paused", False) and S.state in (STATE_LOCAL, STATE_TEST) \
+            and not S.show_settings and not S.show_keys:
+        draw_pause(S, now)
 
     if S.show_settings:
         overlay = pygame.Surface((cfg.WIDTH, cfg.HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 140))
         screen.blit(overlay, (0, 0))
-        draw_card(screen, SETTINGS_RECT)
+        # removed draw_card(screen, SETTINGS_RECT)
         draw_text(screen, "SETTINGS", S.big_font, 0, SETTINGS_RECT.y + 24, cfg.GOLD, center_x=CENTER_X)
         draw_divider(screen, SETTINGS_RECT.x + 30, SETTINGS_RECT.y + 66, SETTINGS_RECT.w - 60)
 

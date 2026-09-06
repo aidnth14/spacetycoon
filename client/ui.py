@@ -93,6 +93,26 @@ class ShipFlyby:
             pygame.draw.circle(surf, self.WINDOW, (wx, y + ih // 2), 2)
 
 
+def _lerp(a, b, t):
+    return (int(a[0] + (b[0] - a[0]) * t),
+            int(a[1] + (b[1] - a[1]) * t),
+            int(a[2] + (b[2] - a[2]) * t))
+
+
+def make_vignette(w, h, depth=165):
+    """Cached radial darkening for the screen edges. Built small (cheap
+    per-pixel) then smoothscaled up so it costs almost nothing to blit."""
+    import math
+    s = 40
+    small = pygame.Surface((s, s), pygame.SRCALPHA)
+    for y in range(s):
+        for x in range(s):
+            d = math.hypot(x - s / 2, y - s / 2) / (s / 2 * 1.42)
+            a = int(min(1.0, d * d) * depth)
+            small.set_at((x, y), (0, 0, 0, a))
+    return pygame.transform.smoothscale(small, (w, h))
+
+
 def draw_glow_text(surf, text, font, x, y, color, glow_color=None, glow_radius=2, center_x=None):
     glow_color = glow_color or color
     rendered = font.render(text, True, color)
@@ -177,14 +197,11 @@ class TextInput:
             self.value += event.unicode
 
     def draw(self, surf, font, small_font):
-        border = cfg.GOLD if self.active else cfg.INPUT_BORDER
         draw_text(surf, self.label, small_font, self.rect.x + 2, self.rect.y - 20, cfg.GOLD_DIM)
-        pygame.draw.rect(surf, cfg.INPUT_BG, self.rect, border_radius=8)
-        pygame.draw.rect(surf, border, self.rect, 2, border_radius=8)
 
-        prefix_color = cfg.GOLD if self.active else cfg.MUTED
+        prefix_color = cfg.GOLD if self.active else cfg.GOLD_DIM
         draw_text(surf, "›", font, self.rect.x + 10, self.rect.y + 6, prefix_color)
-        draw_text(surf, self.value, font, self.rect.x + 30, self.rect.y + 6, cfg.WHITE)
+        draw_text(surf, self.value, font, self.rect.x + 30, self.rect.y + 6, cfg.GOLD)
 
         if self.active and int(pygame.time.get_ticks() / 500) % 2 == 0:
             tw = font.size(self.value)[0]
@@ -193,19 +210,26 @@ class TextInput:
 
 
 class Button:
-    def __init__(self, x, y, w, h, label, primary=True):
+    def __init__(self, x, y, w, h, label, primary=True, palette=None):
         self.rect = pygame.Rect(x, y, w, h)
         self.label = label
         self.primary = primary
+        # palette: dict of fill/fill_hover/border/border_hover/text/accent to
+        # override the default green. Lets the lobby use a sand skin.
+        self.palette = palette or {}
 
     def draw(self, surf, font):
-        hover = self.rect.collidepoint(pygame.mouse.get_pos())
-        bg = cfg.BTN_BG_HOVER if hover else cfg.BTN_BG
-        border = cfg.GOLD if hover else cfg.BTN_BORDER
-        pygame.draw.rect(surf, bg, self.rect, border_radius=10)
-        pygame.draw.rect(surf, border, self.rect, 2, border_radius=10)
-        txt = font.render(self.label, True, cfg.WHITE)
-        surf.blit(txt, (self.rect.centerx - txt.get_width() // 2, self.rect.centery - txt.get_height() // 2))
+        import time, math
+        r = self.rect
+        hover = r.collidepoint(pygame.mouse.get_pos())
+        color = cfg.SAND_BRIGHT if hover else cfg.SAND
+
+        txt_w = draw_text(surf, self.label, font, 0, r.centery - font.get_height() // 2, color, center_x=r.centerx)
+
+        if hover:
+            now = time.time()
+            px = r.centerx + txt_w // 2 + 14 + int(2 * math.sin(now * 6))
+            draw_text(surf, "◄", font, px, r.centery - font.get_height() // 2, cfg.SAND_BRIGHT)
 
     def clicked(self, pos):
         return self.rect.collidepoint(pos)
@@ -312,7 +336,7 @@ class Slider:
         pygame.draw.circle(surf, cfg.GOLD, (hx, hy), 9)
         pygame.draw.circle(surf, cfg.CARD_BG, (hx, hy), 4)
         pct = int(self.value * 100)
-        draw_text(surf, f"{pct}%", font, self.rect.right + 16, self.rect.y - 8, cfg.WHITE)
+        draw_text(surf, f"{pct}%", font, self.rect.right + 16, self.rect.y - 8, cfg.GOLD)
 
 
 def draw_focus_ring(surf, rect, color=None, pad=5):
@@ -344,14 +368,11 @@ class Stepper:
         draw_text(surf, self.label, small_font, self.rect.x, self.rect.y - 20, cfg.GOLD_DIM)
         for r, sym in ((self.minus_rect, "-"), (self.plus_rect, "+")):
             hover = r.collidepoint(pygame.mouse.get_pos())
-            pygame.draw.rect(surf, cfg.BTN_BG_HOVER if hover else cfg.BTN_BG, r, border_radius=6)
-            pygame.draw.rect(surf, cfg.GOLD if hover else cfg.BTN_BORDER, r, 2, border_radius=6)
-            txt = font.render(sym, True, cfg.WHITE)
+            color = cfg.GOLD if hover else cfg.GOLD_DIM
+            txt = font.render(sym, True, color)
             surf.blit(txt, (r.centerx - txt.get_width() // 2, r.centery - txt.get_height() // 2))
         mid = pygame.Rect(self.minus_rect.right, self.rect.y, self.plus_rect.x - self.minus_rect.right, self.rect.h)
-        pygame.draw.rect(surf, cfg.INPUT_BG, mid)
-        pygame.draw.rect(surf, cfg.INPUT_BORDER, mid, 1)
-        val_txt = font.render(str(self.value), True, cfg.WHITE)
+        val_txt = font.render(str(self.value), True, cfg.GOLD)
         surf.blit(val_txt, (mid.centerx - val_txt.get_width() // 2, mid.centery - val_txt.get_height() // 2))
 
 

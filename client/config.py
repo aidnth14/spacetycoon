@@ -4,15 +4,20 @@ WIDTH, HEIGHT = 800, 640
 
 MONO_FONTS = "consolas,menlo,couriernew,dejavusansmono,monospace"
 
-# accent (var names kept for compatibility; palette is now teal-cyan, no yellow)
-GOLD = (90, 200, 220)
-GOLD_DIM = (70, 140, 160)
-GOLD_FAINT = (45, 90, 105)
+# accent (replaced blue with sand)
+GOLD = (240, 214, 158)       # was cyan, now SAND_BRIGHT
+GOLD_DIM = (198, 172, 122)   # was dim cyan, now SAND
+GOLD_FAINT = (148, 122, 72)  # was faint cyan, now a darker sand
 WHITE = (235, 235, 235)
 MUTED = (150, 150, 165)
 RED = (255, 110, 110)
 GREEN = (110, 255, 150)
 BG = (5, 5, 10)
+
+# desert-sand lobby text menu
+SAND = (198, 172, 122)
+SAND_BRIGHT = (240, 214, 158)
+SAND_SHADOW = (18, 14, 8)
 
 CARD_BG = (16, 17, 24)
 CARD_SHADOW = (0, 0, 0)
