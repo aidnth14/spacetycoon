@@ -1147,7 +1147,8 @@ def frame(S, events, dt, now):
             elif t == "connect_error":
                 reset_to_menu(S, msg["error"])
             elif t == "disconnected":
-                reset_to_menu(S, "Disconnected from server.")
+                err = msg.get("error", "closed")
+                reset_to_menu(S, f"Disconnected from server ({err}).")
     except queue.Empty:
         pass
 
