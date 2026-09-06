@@ -1,0 +1,33 @@
+SPACE TYCOON — CONTROLS
+=======================
+
+MOUSE + KEYBOARD
+----------------
+Click server address field      Focus it, type to edit
+Click room code field           Focus it, type to edit (JOIN only)
+Backspace                       Delete last character in focused field
+Click gear icon                 Open settings panel
+Click HOST                      Create a room, get a room code
+Click JOIN                      Join a room using the entered code
+Esc                             Close settings panel (when open)
+
+GAMEPAD (any standard Xbox/PlayStation-layout controller)
+----------------------------------------------------------
+D-pad / left stick left-right   Move focus between gear / HOST / JOIN
+A button                        Confirm focused action
+B button                        Close settings panel
+
+  Settings panel open:
+D-pad / left stick left-right   Adjust music volume (±5%)
+A button                        Toggle music mute on/off
+B button                        Close settings panel
+
+Gamepads are hot-pluggable — connect at any time, no restart needed.
+Text fields (server address, room code) are mouse/keyboard only; there's
+no on-screen keyboard for controller text entry.
+
+SETTINGS PANEL
+--------------
+Music volume slider    Drag the handle, or click anywhere on the track
+Music toggle            Click to mute/unmute (keeps your volume level)
+CLOSE button            Or click outside the panel, or press Esc
