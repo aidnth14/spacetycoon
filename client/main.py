@@ -84,7 +84,17 @@ def present():
     """Scale the canvas into the window, stretching to fill completely."""
     ww, wh = S.window.get_size()
     scaled = pygame.transform.smoothscale(S.screen, (ww, wh))
-    S.window.blit(scaled, (0, 0))
+    
+    # Screen shake
+    dx = dy = 0
+    if getattr(S, "shake", 0.0) > 0.0:
+        import random
+        intensity = S.shake * 15
+        dx = random.randint(-int(intensity), int(intensity))
+        dy = random.randint(-int(intensity), int(intensity))
+        S.shake = max(0.0, S.shake - 0.05)
+        
+    S.window.blit(scaled, (dx, dy))
     pygame.display.flip()
 
 S.clock = pygame.time.Clock()

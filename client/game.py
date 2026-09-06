@@ -495,7 +495,7 @@ def do_local(S):
     for i in range(n):
         ang = (i / n) * 6.28318
         fx, fy = S.iso.find_free(math.cos(ang) * 3, math.sin(ang) * 3)
-        S.local_players.append([fx, fy, 0.0, 0.0])
+        S.local_players.append([fx, fy, 0.0, 0.0, 0.0, 0.0, 0.0])
         S.local_names.append(S.name_inputs[i].value.strip() or f"P{i+1}")
     snap_camera(S, *centroid(S.local_players))
     S.status_msg = ""
@@ -503,31 +503,69 @@ def do_local(S):
 
 
 # --- world play helpers (shared by single / local / online) ---
-def iso_move(S, p, up, down, left, right, dt):
-    """Walk the isometric grid axes with collision: up=NE, down=SW, left=NW,
-    right=SE. Props (rocks/logs/boulders) are solid — you slide along them,
-    unless you're mid-jump, in which case you clear them."""
+def iso_move(S, p, up, down, left, right, dash, dt):
+    """Walk the isometric grid axes with collision and dashing."""
+    if len(p) < 7:
+        p.extend([0.0, 0.0, 0.0])  # ensure dash state exists
+        
     dgx = dgy = 0.0
-    if up:    dgy -= 1   # north-east
-    if down:  dgy += 1   # south-west
-    if left:  dgx -= 1   # north-west
-    if right: dgx += 1   # south-east
-    if not (dgx or dgy):
+    if up:    dgy -= 1
+    if down:  dgy += 1
+    if left:  dgx -= 1
+    if right: dgx += 1
+    
+    if dash and p[4] <= 0 and (dgx or dgy):
+        p[4] = 0.8  # cooldown
+        L = math.hypot(dgx, dgy)
+        p[5] = (dgx / L) * 45.0  # dash burst velocity
+        p[6] = (dgy / L) * 45.0
+        S.shake = 0.5            # juicy screen shake
+        
+    if p[4] > 0: p[4] -= dt
+    
+    # friction on dash velocity
+    p[5] *= (0.001 ** dt)
+    p[6] *= (0.001 ** dt)
+    
+    if dgx or dgy:
+        L = math.hypot(dgx, dgy)
+        step = SPEED_CELLS * dt
+        dgx = dgx / L * step
+        dgy = dgy / L * step
+        
+    total_dx = dgx + p[5] * dt
+    total_dy = dgy + p[6] * dt
+    
+    if not (total_dx or total_dy):
         return
-    L = math.hypot(dgx, dgy)
-    step = SPEED_CELLS * dt
-    dgx = dgx / L * step
-    dgy = dgy / L * step
+        
     iso = S.iso
     airborne = p[2] > JUMP_CLEAR
-    if airborne or not iso.solid(p[0] + dgx, p[1] + dgy):
-        p[0] += dgx
-        p[1] += dgy
-    else:  # blocked head-on — try sliding along each axis
-        if not iso.solid(p[0] + dgx, p[1]):
-            p[0] += dgx
-        if not iso.solid(p[0], p[1] + dgy):
-            p[1] += dgy
+    nx, ny = p[0] + total_dx, p[1] + total_dy
+    
+    if airborne or not iso.solid(nx, ny):
+        p[0] = nx
+        p[1] = ny
+    else:
+        if not iso.solid(nx, p[1]):
+            p[0] = nx
+            p[5] = 0  # kill x velocity if walled
+        elif not iso.solid(p[0], ny):
+            p[1] = ny
+            p[6] = 0  # kill y velocity if walled
+            
+    # Juicy Knockback: If dashing fast, push other local players
+    if abs(p[5]) > 10 or abs(p[6]) > 10:
+        if hasattr(S, 'local_players'):
+            for other in S.local_players:
+                if other is not p:
+                    dist = math.hypot(other[0] - p[0], other[1] - p[1])
+                    if dist < 0.8 and abs(other[2] - p[2]) < 10:  # hit radius
+                        other[5] += p[5] * 0.8  # transfer momentum
+                        other[6] += p[6] * 0.8
+                        p[5] *= 0.2  # slow self down on impact
+                        p[6] *= 0.2
+                        S.shake = max(S.shake, 0.8)  # bigger shake on hit!
 
 
 def apply_jump(p, dt):
@@ -599,7 +637,7 @@ def zoom(S, delta):
 def enter_world(S):
     """Drop this client's avatar onto the map (online modes)."""
     import random
-    S.me = list(S.iso.find_free(0.0, 0.0)) + [0.0, 0.0]   # fx, fy, z, vz
+    S.me = list(S.iso.find_free(0.0, 0.0)) + [0.0, 0.0, 0.0, 0.0, 0.0]   # fx, fy, z, vz, dash_time, dash_x, dash_y
     S.peers = {}
     S.client_id = f"{S.username}#{random.randint(1000, 9999)}"
     snap_camera(S, S.me[0], S.me[1])
@@ -1185,7 +1223,8 @@ def frame(S, events, dt, now):
             down = keys[pygame.K_s] or keys[pygame.K_DOWN]
             left = keys[pygame.K_a] or keys[pygame.K_LEFT]
             right = keys[pygame.K_d] or keys[pygame.K_RIGHT]
-            iso_move(S, S.me, up, down, left, right, dt)
+            dash = keys[pygame.K_LSHIFT]
+            iso_move(S, S.me, up, down, left, right, dash, dt)
         apply_jump(S.me, dt)
         follow_camera(S, S.me[0], S.me[1], dt)
 
@@ -1210,19 +1249,20 @@ def frame(S, events, dt, now):
                 S.ping_count += 1
                 S.last_ping_time = now
             except Exception:
-                reset_to_menu(S, "Send failed — connection lost.")
+                reset_to_menu(S, "Ping failed.")
         if S.last_pong_time and now - S.last_pong_time > cfg.CONNECTION_TIMEOUT:
             reset_to_menu(S, f"Connection timed out (no response for {cfg.CONNECTION_TIMEOUT:.0f}s).")
 
     if S.state == STATE_LOCAL:
         keys = pygame.key.get_pressed()
-        frozen = S.chat_open or getattr(S, "paused", False)
-        for i, p in enumerate(S.local_players):
-            _, up, down, left, right, _, _ = SCHEMES[i]
-            if frozen:                            # chat / pause freezes movement
-                iso_move(S, p, False, False, False, False, dt)
+        for i in range(len(S.local_players)):
+            p = S.local_players[i]
+            scheme, up, down, left, right, color, jump = SCHEMES[i]
+            if getattr(S, "paused", False) or S.chat_open:
+                iso_move(S, p, False, False, False, False, False, dt)
             else:
-                iso_move(S, p, keys[up], keys[down], keys[left], keys[right], dt)
+                dash = False # We can map dash to a specific key per player if we want, or just let them jump
+                iso_move(S, p, keys[up], keys[down], keys[left], keys[right], dash, dt)
             apply_jump(p, dt)
         follow_camera(S, *centroid(S.local_players), dt)
 
