@@ -1322,8 +1322,31 @@ def frame(S, events, dt, now):
     if S.state == STATE_WAKE:
         draw_header(S, "")
         elapsed = time.time() - S.wake_start_time
-        msg = f"server starting... {elapsed:.1f}s"
-        draw_text(screen, msg, S.font, 0, CARD_Y + 120, cfg.GOLD_DIM, center_x=CENTER_X)
+        
+        # Juicy orbital loading animation
+        cx, cy = CENTER_X, CARD_Y + 120
+        num_orbs = 6
+        for i in range(num_orbs):
+            ang = now * 4.0 + (i * 6.28318 / num_orbs)
+            rad = 40 + math.sin(now * 6.0 + i) * 15
+            ox = cx + math.cos(ang) * rad
+            oy = cy + math.sin(ang) * rad * 0.4  # flatten to isometric perspective!
+            
+            # depth sorting hack: draw back half darker
+            is_back = math.sin(ang) < 0
+            color = cfg.GOLD_DIM if is_back else cfg.GOLD
+            size = max(2, int(5 + math.cos(ang) * 2))
+            
+            pygame.draw.circle(screen, color, (int(ox), int(oy)), size)
+            if not is_back:
+                pygame.draw.circle(screen, cfg.WHITE, (int(ox), int(oy)), size // 2)
+
+        # Pulsing loading text
+        msg = f"WAKING SERVER [{elapsed:.1f}s]"
+        alpha = int(180 + 75 * math.sin(now * 5))
+        text_surf = S.big_font.render(msg, True, cfg.GOLD_FAINT)
+        text_surf.set_alpha(alpha)
+        screen.blit(text_surf, (cx - text_surf.get_width() // 2, cy + 60))
 
     elif S.state == STATE_MENU:
         draw_header(S, "")
