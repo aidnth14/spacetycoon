@@ -845,9 +845,7 @@ def frame(S, events, dt, now):
                 S.show_keys = False
             continue
 
-        if event.type == pygame.MOUSEBUTTONDOWN and not S.show_settings and S.close_btn.clicked(event.pos):
-            running = False
-            continue
+        # (Removed close_btn click handler)
 
         if event.type == pygame.MOUSEBUTTONDOWN and not S.show_settings and S.help_icon_btn.clicked(event.pos):
             S.show_keys = True
@@ -1382,7 +1380,7 @@ def frame(S, events, dt, now):
 
     if S.state not in (STATE_TEST, STATE_LOCAL):
         draw_footer(S)
-    S.close_btn.draw(screen)
+    
     S.help_icon_btn.draw(screen)
     if S.state != STATE_MENU and not S.show_settings and not getattr(S, "paused", False):
         S.panel_x.draw(screen)

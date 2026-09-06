@@ -39,15 +39,15 @@ pygame.display.set_caption("Space Tycoon")
 
 
 def canvas_fit():
-    """Return (scale, offx, offy) mapping the canvas into the current window."""
     ww, wh = S.window.get_size()
-    scale = min(ww / CW, wh / CH)
-    return scale, (ww - CW * scale) / 2, (wh - CH * scale) / 2
+    scale_x = ww / CW
+    scale_y = wh / CH
+    return scale_x, scale_y
 
 
 def to_canvas(pos):
-    scale, offx, offy = canvas_fit()
-    return ((pos[0] - offx) / scale, (pos[1] - offy) / scale)
+    scale_x, scale_y = canvas_fit()
+    return (pos[0] / scale_x, pos[1] / scale_y)
 
 
 def remap_events(events):
@@ -81,11 +81,10 @@ pygame.mouse.get_pos = lambda: tuple(int(v) for v in to_canvas(_real_mouse_pos()
 
 
 def present():
-    """Scale the canvas into the window with letterboxing, then flip."""
-    scale, offx, offy = canvas_fit()
-    S.window.fill((0, 0, 0))
-    scaled = pygame.transform.smoothscale(S.screen, (int(CW * scale), int(CH * scale)))
-    S.window.blit(scaled, (int(offx), int(offy)))
+    """Scale the canvas into the window, stretching to fill completely."""
+    ww, wh = S.window.get_size()
+    scaled = pygame.transform.smoothscale(S.screen, (ww, wh))
+    S.window.blit(scaled, (0, 0))
     pygame.display.flip()
 
 S.clock = pygame.time.Clock()
