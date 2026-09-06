@@ -118,8 +118,11 @@ def draw_glow_text(surf, text, font, x, y, color, glow_color=None, glow_radius=2
     rendered = font.render(text, True, color)
     if center_x is not None:
         x = center_x - rendered.get_width() // 2
-    glow = font.render(text, True, glow_color)
-    glow.set_alpha(28)
+    
+    # Render glow text with a darker base color instead of using set_alpha() which can cause solid boxes
+    dim_color = (glow_color[0] // 4, glow_color[1] // 4, glow_color[2] // 4)
+    glow = font.render(text, True, dim_color)
+    
     for dx in range(-glow_radius, glow_radius + 1):
         for dy in range(-glow_radius, glow_radius + 1):
             if dx == 0 and dy == 0:
@@ -229,7 +232,7 @@ class Button:
         if hover:
             now = time.time()
             px = r.centerx + txt_w // 2 + 14 + int(2 * math.sin(now * 6))
-            draw_text(surf, "◄", font, px, r.centery - font.get_height() // 2, cfg.SAND_BRIGHT)
+            draw_text(surf, "<", font, px, r.centery - font.get_height() // 2, cfg.SAND_BRIGHT)
 
     def clicked(self, pos):
         return self.rect.collidepoint(pos)
@@ -277,6 +280,14 @@ class IconButton:
             line_col = cfg.RED if hover else color
             pygame.draw.line(surf, line_col, (cx - d, cy - d), (cx + d, cy + d), 2)
             pygame.draw.line(surf, line_col, (cx - d, cy + d), (cx + d, cy - d), 2)
+            return
+        if self.kind == "help":
+            r = self.rect.w // 2 - 2
+            pygame.draw.circle(surf, cfg.CARD_BG, (cx, cy), r + 3)
+            pygame.draw.circle(surf, color, (cx, cy), r, 2)
+            font = pygame.font.SysFont("Courier", int(r * 1.5), bold=True)
+            text = font.render("?", True, color)
+            surf.blit(text, (cx - text.get_width() // 2 + 1, cy - text.get_height() // 2 + 1))
             return
         r_outer = self.rect.w // 2 - 2
         r_inner = int(r_outer * 0.55)

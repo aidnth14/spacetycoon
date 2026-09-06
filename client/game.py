@@ -223,6 +223,7 @@ def _build_ui(S):
 
     S.close_btn = IconButton(cfg.WIDTH - 42, 14, 30, kind="close")  # quits the app
     S.panel_x = IconButton(CARD.right - 42, CARD_Y + 12, 28, kind="close")  # closes current panel
+    S.help_icon_btn = IconButton(cfg.WIDTH - 42, cfg.HEIGHT - 42, 30, kind="help")
 
     S.music_icon = _load_icon(os.path.join(S.ASSETS_DIR, "music.png"), 26)
     S.sound_icon = _load_icon(os.path.join(S.ASSETS_DIR, "sound.png"), 26)
@@ -824,9 +825,6 @@ def draw_footer(S):
     if S.using_controller:
         draw_text(screen, "Gamepad: D-pad move · A confirm · B back", S.small_font,
                   0, cfg.HEIGHT - 32, cfg.GOLD_FAINT, center_x=CENTER_X)
-    else:
-        draw_text(screen, "WebSocket relay over Fly.io — encrypted (wss://)", S.small_font,
-                  0, cfg.HEIGHT - 32, cfg.GOLD_FAINT, center_x=CENTER_X)
 
 
 def frame(S, events, dt, now):
@@ -849,6 +847,10 @@ def frame(S, events, dt, now):
 
         if event.type == pygame.MOUSEBUTTONDOWN and not S.show_settings and S.close_btn.clicked(event.pos):
             running = False
+            continue
+
+        if event.type == pygame.MOUSEBUTTONDOWN and not S.show_settings and S.help_icon_btn.clicked(event.pos):
+            S.show_keys = True
             continue
 
         # per-panel close (X) at the card corner backs out one level
@@ -1242,13 +1244,13 @@ def frame(S, events, dt, now):
             pass # Removed card background to look like main lobby UI
 
     if S.state == STATE_WAKE:
-        draw_header(S, "Connectivity Tester")
+        draw_header(S, "")
         elapsed = time.time() - S.wake_start_time
         msg = f"server starting... {elapsed:.1f}s"
         draw_text(screen, msg, S.font, 0, CARD_Y + 120, cfg.GOLD_DIM, center_x=CENTER_X)
 
     elif S.state == STATE_MENU:
-        draw_header(S, "Connectivity Tester")
+        draw_header(S, "")
         # hovering a menu item selects it (keeps mouse + keyboard in sync)
         mouse = pygame.mouse.get_pos()
         for i, btn in enumerate(S.MENU_FOCUS):
@@ -1265,7 +1267,7 @@ def frame(S, events, dt, now):
             w = draw_text(screen, btn.label, S.body_font, r.x, r.centery - 12, color)
             if selected:  # cursor pointing at the current selection
                 px = r.x + w + 14 + int(2 * math.sin(now * 6))  # gentle nudge
-                draw_text(screen, "◄", S.body_font, px, r.centery - 12, cfg.SAND_BRIGHT)
+                draw_text(screen, "<", S.body_font, px, r.centery - 12, cfg.SAND_BRIGHT)
         if S.status_msg:
             draw_wrapped_text(screen, S.status_msg, S.font, 126,
                               cfg.WIDTH - 120, cfg.RED, center_x=CENTER_X)
@@ -1381,6 +1383,7 @@ def frame(S, events, dt, now):
     if S.state not in (STATE_TEST, STATE_LOCAL):
         draw_footer(S)
     S.close_btn.draw(screen)
+    S.help_icon_btn.draw(screen)
     if S.state != STATE_MENU and not S.show_settings and not getattr(S, "paused", False):
         S.panel_x.draw(screen)
 
