@@ -21,8 +21,8 @@ from ui import (
     draw_focus_ring,
 )
 
-STATE_MENU, STATE_SETUP, STATE_WAIT, STATE_TEST, STATE_LOCAL = \
-    "menu", "setup", "wait", "test", "local"
+STATE_MENU, STATE_SETUP, STATE_WAIT, STATE_TEST, STATE_LOCAL, STATE_WAKE = \
+    "menu", "setup", "wait", "test", "local", "wake"
 
 JOYSTICK_A, JOYSTICK_B = 0, 1  # standard Xbox/PlayStation layout button indices
 SPEED_CELLS = 5.5  # avatar walk speed in grid cells / sec (zoom-independent)
@@ -377,7 +377,7 @@ def activate_focused(S):
     elif widget is getattr(S, "host_local_coop_btn", None):
         go_setup(S, "local")
     elif widget is getattr(S, "host_online_coop_btn", None):
-        go_setup(S, "host")
+        start_wake_server(S)
     elif widget is getattr(S, "menu_back_btn", None):
         if S.menu_page == "host":
             S.menu_page = "online"
@@ -388,6 +388,26 @@ def activate_focused(S):
         update_menu_layout(S)
         
     return None
+
+
+def start_wake_server(S):
+    S.state = STATE_WAKE
+    S.wake_start_time = time.time()
+    
+    def _ping_server():
+        import urllib.request, urllib.error
+        http_url = cfg.DEFAULT_SERVER.replace("wss://", "https://").replace("ws://", "http://")
+        try:
+            urllib.request.urlopen(http_url, timeout=45)
+        except urllib.error.HTTPError as e:
+            pass  # 426 Upgrade Required means it's awake!
+        except Exception as e:
+            pass  # We will let the network layer handle actual failures
+        S.server_woken = True
+        
+    S.server_woken = False
+    import threading
+    threading.Thread(target=_ping_server, daemon=True).start()
 
 
 def go_back(S):
@@ -1081,6 +1101,10 @@ def frame(S, events, dt, now):
                 and S.state in (STATE_SETUP, STATE_WAIT):
             go_back(S)
 
+    if S.state == STATE_WAKE:
+        if S.server_woken:
+            go_setup(S, "host")
+
     # --- keep the playlist cycling ---
     # the MUSIC_END_EVENT above handles it on most builds, but some SDL setups
     # never post it, so also advance when the track has simply stopped playing.
@@ -1217,7 +1241,13 @@ def frame(S, events, dt, now):
         if S.state != STATE_MENU:
             pass # Removed card background to look like main lobby UI
 
-    if S.state == STATE_MENU:
+    if S.state == STATE_WAKE:
+        draw_header(S, "Connectivity Tester")
+        elapsed = time.time() - S.wake_start_time
+        msg = f"server starting... {elapsed:.1f}s"
+        draw_text(screen, msg, S.font, 0, CARD_Y + 120, cfg.GOLD_DIM, center_x=CENTER_X)
+
+    elif S.state == STATE_MENU:
         draw_header(S, "Connectivity Tester")
         # hovering a menu item selects it (keeps mouse + keyboard in sync)
         mouse = pygame.mouse.get_pos()
