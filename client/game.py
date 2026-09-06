@@ -677,8 +677,46 @@ def draw_world_hud(S, lines, hint):
     for i, s in enumerate(surf):
         screen.blit(s, (12 + pad, 12 + pad + i * 20))
     if hint:
-        draw_text(screen, hint, S.small_font, 0, cfg.HEIGHT - 30, cfg.GOLD_FAINT,
+        draw_text(screen, hint, S.small_font, 0, cfg.HEIGHT - 90, cfg.GOLD_FAINT,
                   center_x=cfg.WIDTH // 2)
+
+    # --- Draw Hearts (Top Left, below HUD) ---
+    heart_path = os.path.join(S.ASSETS_DIR, "ui", "heart.png")
+    heart_img = None
+    if os.path.exists(heart_path):
+        try:
+            heart_img = pygame.transform.smoothscale(pygame.image.load(heart_path).convert_alpha(), (24, 24))
+        except: pass
+
+    for i in range(5):
+        hx, hy = 16 + i * 28, h + 24
+        if heart_img:
+            screen.blit(heart_img, (hx, hy))
+        else:
+            pygame.draw.circle(screen, cfg.RED, (hx + 7, hy + 7), 7)
+            pygame.draw.circle(screen, cfg.RED, (hx + 17, hy + 7), 7)
+            pygame.draw.polygon(screen, cfg.RED, [(hx, hy + 10), (hx + 24, hy + 10), (hx + 12, hy + 22)])
+
+    # --- Draw Inventory (Bottom Center) ---
+    cell_path = os.path.join(S.ASSETS_DIR, "ui", "inv_cell.png")
+    cell_img = None
+    if os.path.exists(cell_path):
+        try:
+            cell_img = pygame.transform.smoothscale(pygame.image.load(cell_path).convert_alpha(), (48, 48))
+        except: pass
+
+    inv_w = 5 * 52
+    start_x = cfg.WIDTH // 2 - inv_w // 2
+    y_inv = cfg.HEIGHT - 65
+    for i in range(5):
+        cx = start_x + i * 52
+        if cell_img:
+            screen.blit(cell_img, (cx, y_inv))
+        else:
+            r = pygame.Rect(cx, y_inv, 48, 48)
+            pygame.draw.rect(screen, (20, 24, 30), r, border_radius=8)
+            pygame.draw.rect(screen, cfg.GOLD_DIM, r, 2, border_radius=8)
+
 
 
 def load_game_icons(S):
