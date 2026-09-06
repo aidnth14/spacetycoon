@@ -1105,8 +1105,12 @@ def frame(S, events, dt, now):
                 S.lobby_name = msg.get("lobby_name", "")
                 S.max_players = msg.get("max_players", 2)
                 S.player_count = msg.get("player_count", 2)
-                S.status_msg = "Joined — waiting for host..."
                 S.last_pong_time = now
+                if S.player_count > 1:
+                    S.status_msg = "Connected!"
+                    S.state = STATE_TEST
+                else:
+                    S.status_msg = "Joined — waiting for host..."
             elif t == "peer_joined":
                 S.player_count = msg.get("player_count", S.player_count + 1)
                 S.status_msg = "Peer connected!"
@@ -1131,6 +1135,8 @@ def frame(S, events, dt, now):
             elif t == "ping":
                 S.conn.send({"type": "pong", "t": msg["t"]})
                 S.pong_count += 1
+                if S.state == STATE_WAIT:
+                    S.state = STATE_TEST
             elif t == "pong":
                 S.last_rtt = (now - msg["t"]) * 1000
                 S.last_pong_time = now
