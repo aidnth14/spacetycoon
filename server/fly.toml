@@ -1,4 +1,4 @@
-app = 'spacetycoon-relay'
+app = 'starwars-coop-relay'
 primary_region = 'iad'
 
 [build]

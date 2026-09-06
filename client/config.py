@@ -1,4 +1,4 @@
-DEFAULT_SERVER = "ws://127.0.0.1:8080"
+DEFAULT_SERVER = "wss://starwars-coop-relay.fly.dev"
 
 WIDTH, HEIGHT = 800, 640
 
