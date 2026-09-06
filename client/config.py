@@ -37,7 +37,15 @@ CARD_RADIUS = 14
 CONNECTION_TIMEOUT = 12.0  # seconds without a pong before we call it dead
 PING_INTERVAL = 1.0
 
-MUSIC_TRACKS = ["neon_market.wav", "orbital_drift.wav", "cargo_run.wav", "boardroom.wav",
-                "sanctuary_guardians.wav", "alien_wolves.wav", "melancholic_walk.wav"]
+MUSIC_TRACKS = [
+    "neon_market.wav", "orbital_drift.wav", "cargo_run.wav", "boardroom.wav",
+    "sanctuary_guardians.wav", "alien_wolves.wav", "melancholic_walk.wav",
+    "8bit-Grim Waltz - Creepy Retro Gaming Music For Streaming [No Copyright].mp3.wav",
+    "8bit-LonePeakMusic - Highway 1 (16 Bit Retro Gaming Version).mp3.wav",
+    "8bit-Mystery  Free mystery music for YouTube videos (no copyright).mp3.wav",
+    "8bit-One Cosmos  Royalty Free Sci-Fi Background Music (No Copyright).mp3.wav",
+    "8bit-Plinian - Epic Retro Gaming 16 Bit Music [No Copyright].mp3.wav",
+    "8bit-Tronicles SciFi - Free Music  [Royalty Free No Copyright].mp3.wav"
+]
 MUSIC_VOLUME = 0.22  # dimmed, ambient lobby melody rather than full theme blast
 MUSIC_FADE_MS = 1500
