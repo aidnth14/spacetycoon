@@ -1,4 +1,4 @@
-DEFAULT_SERVER = "wss://starwars-coop-relay.fly.dev"
+DEFAULT_SERVER = "wss://spacetycoon-relay.onrender.com"
 
 WIDTH, HEIGHT = 800, 640
 
