@@ -309,7 +309,8 @@ class Slider:
         return (pos[0] - hx) ** 2 + (pos[1] - hy) ** 2 <= 12 ** 2
 
     def handle_mousedown(self, pos):
-        if self.hit_handle(pos) or self.rect.collidepoint((pos[0], self.rect.centery)):
+        # Check if mouse is near the slider horizontally and vertically
+        if self.hit_handle(pos) or (self.rect.x <= pos[0] <= self.rect.right and abs(pos[1] - self.rect.centery) <= 15):
             self.dragging = True
             self._update_from_x(pos[0])
             return True

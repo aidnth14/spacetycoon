@@ -79,7 +79,7 @@ BTN_H = 52
 btn_y = CARD_Y + 280
 GEAR_SIZE, GEAR_GAP = 40, 12
 
-SETTINGS_W, SETTINGS_H = 460, 440
+SETTINGS_W, SETTINGS_H = 680, 560
 SETTINGS_RECT = pygame.Rect(CENTER_X - SETTINGS_W // 2, cfg.HEIGHT // 2 - SETTINGS_H // 2,
                             SETTINGS_W, SETTINGS_H)
 
@@ -100,7 +100,7 @@ def play_track_at(S, index):
     try:
         pygame.mixer.music.load(path)
         pygame.mixer.music.set_volume(0.0 if S.music_muted else S.music_volume)
-        pygame.mixer.music.play(fade_ms=cfg.MUSIC_FADE_MS)
+        pygame.mixer.music.play()
         S.music_paused = False
     except pygame.error as e:
         print(f"[audio] couldn't load {path}: {e}")
@@ -224,15 +224,30 @@ def _build_ui(S):
     S.close_btn = IconButton(cfg.WIDTH - 42, 14, 30, kind="close")  # quits the app
     S.panel_x = IconButton(CARD.right - 42, CARD_Y + 12, 28, kind="close")  # closes current panel
 
-    sx = SETTINGS_RECT.x + 74  # sliders start right of their icons
-    S.volume_slider = Slider(sx, SETTINGS_RECT.y + 108, 210,
-                             value=cfg.MUSIC_VOLUME, label="MUSIC")
-    S.sound_slider = Slider(sx, SETTINGS_RECT.y + 162, 210, value=0.6, label="SOUND")
     S.music_icon = _load_icon(os.path.join(S.ASSETS_DIR, "music.png"), 26)
     S.sound_icon = _load_icon(os.path.join(S.ASSETS_DIR, "sound.png"), 26)
-    S.music_toggle = Toggle(SETTINGS_RECT.x + 40, SETTINGS_RECT.y + 214, 56, 28, "MUTE", value=False)
 
-    transport_y = SETTINGS_RECT.y + 306
+    # Column 1
+    col1_x = SETTINGS_RECT.x + 40
+    y = SETTINGS_RECT.y + 110
+    S.master_vol_slider = Slider(col1_x, y, 200, value=1.0, label="MASTER VOLUME")
+    S.volume_slider = Slider(col1_x, y + 60, 200, value=cfg.MUSIC_VOLUME, label="MUSIC")
+    S.sound_slider = Slider(col1_x, y + 120, 200, value=0.6, label="SOUND")
+    S.particles_slider = Slider(col1_x, y + 180, 200, value=0.8, label="PARTICLES")
+    S.cam_smooth_slider = Slider(col1_x, y + 240, 200, value=0.5, label="CAMERA SMOOTHING")
+    
+    # Column 2
+    col2_x = SETTINGS_RECT.x + 320
+    S.render_dist_stepper = Stepper(col2_x, y, 200, 30, "RENDER DISTANCE", 16, 8, 32)
+    S.ui_scale_stepper = Stepper(col2_x, y + 60, 200, 30, "UI SCALE", 100, 50, 200)
+    S.chunk_sim_toggle = Toggle(col2_x, y + 120, 56, 28, "CHUNK SIMULATIONS", value=True)
+    S.fps_toggle = Toggle(col2_x, y + 180, 56, 28, "SHOW FPS", value=False)
+    S.vsync_toggle = Toggle(col2_x, y + 240, 56, 28, "V-SYNC", value=True)
+
+    S.music_toggle = Toggle(col1_x, y + 300, 56, 28, "MUTE", value=False)
+    S.keybinds_btn = Button(col2_x, y + 295, 200, 36, "KEYBINDS")
+
+    transport_y = SETTINGS_RECT.y + 460
     tw, th, tgap, mid_w = 100, 40, 16, 140
     total = tw * 2 + mid_w + tgap * 2
     tx = SETTINGS_RECT.centerx - total // 2
@@ -241,6 +256,7 @@ def _build_ui(S):
     S.next_btn = Button(S.play_pause_btn.rect.right + tgap, transport_y, tw, th, "NEXT")
     S.settings_close_btn = Button(SETTINGS_RECT.centerx - 80, SETTINGS_RECT.bottom - 52, 160, 40, "CLOSE")
     S.settings_x = IconButton(SETTINGS_RECT.right - 40, SETTINGS_RECT.y + 12, 26, kind="close")
+
 
     update_menu_layout(S)
 
@@ -880,8 +896,11 @@ def frame(S, events, dt, now):
 
         if S.show_settings:
             if event.type == pygame.MOUSEBUTTONDOWN:
-                grabbed = (S.volume_slider.handle_mousedown(event.pos)
-                           or S.sound_slider.handle_mousedown(event.pos))
+                grabbed = (S.master_vol_slider.handle_mousedown(event.pos)
+                           or S.volume_slider.handle_mousedown(event.pos)
+                           or S.sound_slider.handle_mousedown(event.pos)
+                           or S.particles_slider.handle_mousedown(event.pos)
+                           or S.cam_smooth_slider.handle_mousedown(event.pos))
                 if grabbed:
                     apply_volume(S)
                 elif S.settings_x.clicked(event.pos) or S.settings_close_btn.clicked(event.pos) \
@@ -890,6 +909,18 @@ def frame(S, events, dt, now):
                 elif S.music_toggle.clicked(event.pos):
                     S.music_toggle.value = not S.music_toggle.value
                     apply_volume(S)
+                elif S.chunk_sim_toggle.clicked(event.pos):
+                    S.chunk_sim_toggle.value = not S.chunk_sim_toggle.value
+                elif S.fps_toggle.clicked(event.pos):
+                    S.fps_toggle.value = not S.fps_toggle.value
+                elif S.vsync_toggle.clicked(event.pos):
+                    S.vsync_toggle.value = not S.vsync_toggle.value
+                elif S.keybinds_btn.clicked(event.pos):
+                    S.show_keys = True
+                elif S.render_dist_stepper.handle_click(event.pos):
+                    pass
+                elif S.ui_scale_stepper.handle_click(event.pos):
+                    pass
                 elif S.prev_btn.clicked(event.pos):
                     play_prev_track(S)
                 elif S.play_pause_btn.clicked(event.pos):
@@ -897,12 +928,18 @@ def frame(S, events, dt, now):
                 elif S.next_btn.clicked(event.pos):
                     play_next_track(S)
             elif event.type == pygame.MOUSEBUTTONUP:
+                S.master_vol_slider.handle_mouseup()
                 S.volume_slider.handle_mouseup()
                 S.sound_slider.handle_mouseup()
+                S.particles_slider.handle_mouseup()
+                S.cam_smooth_slider.handle_mouseup()
             elif event.type == pygame.MOUSEMOTION:
+                S.master_vol_slider.handle_mousemotion(event.pos)
                 S.volume_slider.handle_mousemotion(event.pos)
                 S.sound_slider.handle_mousemotion(event.pos)
-                if S.volume_slider.dragging or S.sound_slider.dragging:
+                S.particles_slider.handle_mousemotion(event.pos)
+                S.cam_smooth_slider.handle_mousemotion(event.pos)
+                if S.master_vol_slider.dragging or S.volume_slider.dragging or S.sound_slider.dragging:
                     apply_volume(S)
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 S.show_settings = False
@@ -1322,15 +1359,27 @@ def frame(S, events, dt, now):
         draw_text(screen, "SETTINGS", S.big_font, 0, SETTINGS_RECT.y + 24, cfg.GOLD, center_x=CENTER_X)
         draw_divider(screen, SETTINGS_RECT.x + 30, SETTINGS_RECT.y + 66, SETTINGS_RECT.w - 60)
 
-        for slider, icon in ((S.volume_slider, S.music_icon), (S.sound_slider, S.sound_icon)):
+        for slider in (S.master_vol_slider, S.volume_slider, S.sound_slider, S.particles_slider, S.cam_smooth_slider):
             slider.draw(screen, S.font, S.small_font)
-            if icon is not None:
-                screen.blit(icon, (SETTINGS_RECT.x + 34, slider.rect.centery - 13))
+        
+        # We manually aligned the sliders, let's just place the icons dynamically or near music/sound
+        if S.music_icon is not None:
+            screen.blit(S.music_icon, (SETTINGS_RECT.x + 8, S.volume_slider.rect.centery - 13))
+        if S.sound_icon is not None:
+            screen.blit(S.sound_icon, (SETTINGS_RECT.x + 8, S.sound_slider.rect.centery - 13))
+        
         S.music_toggle.draw(screen, S.small_font)
+        
+        S.render_dist_stepper.draw(screen, S.font, S.small_font)
+        S.ui_scale_stepper.draw(screen, S.font, S.small_font)
+        S.chunk_sim_toggle.draw(screen, S.small_font)
+        S.fps_toggle.draw(screen, S.small_font)
+        S.vsync_toggle.draw(screen, S.small_font)
+        S.keybinds_btn.draw(screen, S.font)
 
-        draw_text(screen, "NOW PLAYING", S.small_font, SETTINGS_RECT.x + 130, SETTINGS_RECT.y + 220, cfg.GOLD_DIM)
+        draw_text(screen, "NOW PLAYING", S.small_font, SETTINGS_RECT.centerx - 80, SETTINGS_RECT.bottom - 130, cfg.GOLD_DIM)
         draw_text(screen, track_display_name(S.music_track_index), S.font,
-                  SETTINGS_RECT.x + 130, SETTINGS_RECT.y + 237, cfg.WHITE)
+                  SETTINGS_RECT.centerx - 80, SETTINGS_RECT.bottom - 110, cfg.WHITE)
 
         S.play_pause_btn.label = "PLAY" if S.music_paused else "PAUSE"
         S.prev_btn.draw(screen, S.small_font)
