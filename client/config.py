@@ -1,4 +1,4 @@
-DEFAULT_SERVER = "wss://spacetycoon-relay.fly.dev"
+DEFAULT_SERVER = "ws://127.0.0.1:8080"
 
 WIDTH, HEIGHT = 800, 640
 
