@@ -14,8 +14,9 @@ logging.basicConfig(
 )
 log = logging.getLogger("relay")
 
+import os
 HOST = "0.0.0.0"
-PORT = 8080
+PORT = int(os.environ.get("PORT", 8080))
 
 # --- keepalive ---
 PING_INTERVAL = 15
