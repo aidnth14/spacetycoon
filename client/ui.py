@@ -257,7 +257,7 @@ class Button:
         self.palette = palette or {}
 
     def draw(self, surf, font):
-        import time, math
+        import time, math, pygame
         r = self.rect
         hover = r.collidepoint(pygame.mouse.get_pos())
         
@@ -267,7 +267,6 @@ class Button:
             border = self.palette.get("border_hover") if hover and "border_hover" in self.palette else self.palette.get("border", cfg.GOLD)
             text_color = self.palette.get("text", cfg.WHITE)
             
-            import pygame
             pygame.draw.rect(surf, bg, r, border_radius=6)
             pygame.draw.rect(surf, border, r, 2, border_radius=6)
             draw_text(surf, self.label, font, 0, r.centery - font.get_height() // 2, text_color, center_x=r.centerx)
