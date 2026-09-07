@@ -236,7 +236,6 @@ def _build_ui(S):
     col2_x = SETTINGS_RECT.x + 320
     S.render_dist_stepper = Stepper(col2_x, y, 200, 30, "RENDER DISTANCE", 6, 2, 16)
     S.fps_toggle = Toggle(col2_x, y + 80, 56, 28, "SHOW FPS", value=False)
-    S.shaders_toggle = Toggle(col2_x, y + 160, 56, 28, "SHADERS", value=True)
 
     S.music_toggle = Toggle(col1_x, y + 160, 56, 28, "MUTE", value=False)
     S.keybinds_btn = Button(col2_x, y + 295, 200, 36, "KEYBINDS")
@@ -1089,50 +1088,6 @@ def draw_footer(S):
 
 
 
-_glow_cache = {}
-def draw_glow(surf, color, cx, cy, radius):
-    import pygame
-    key = (color, radius)
-    if key not in _glow_cache:
-        glow = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
-        for r in range(radius, 0, -2):
-            alpha = int((1.0 - (r / radius)) * 80)
-            pygame.draw.circle(glow, (*color, alpha), (radius, radius), r)
-        _glow_cache[key] = glow
-    
-    surf.blit(_glow_cache[key], (cx - radius, cy - radius), special_flags=pygame.BLEND_RGBA_ADD)
-
-def apply_shaders(S, screen, CW, CH):
-    if not getattr(S, "shaders_toggle", None) or not S.shaders_toggle.value:
-        return
-        
-    import pygame
-    # LIGHTING: Dark ambient with punch-out lights
-    light_layer = pygame.Surface((CW, CH))
-    light_layer.fill((70, 70, 95))  # Ambient blue/grey darkness
-    
-    # Draw lights
-    def add_light(x, y, r, color):
-        draw_glow(light_layer, color, x, y, r)
-            
-    # Add lights for all players
-    for p in getattr(S, "local_players", []):
-        sx, sy = S.iso.to_screen(*S.iso.world_px(p[0], p[1]))
-        sy -= S.iso.elev(p[0], p[1])
-        add_light(int(sx), int(sy), 140, (180, 180, 180))
-        
-    if getattr(S, "me", None):
-        sx, sy = S.iso.to_screen(*S.iso.world_px(S.me[0], S.me[1]))
-        sy -= S.iso.elev(S.me[0], S.me[1])
-        add_light(int(sx), int(sy), 140, (180, 180, 180))
-        
-    for pid, p in getattr(S, "peers", {}).items():
-        sx, sy = S.iso.to_screen(*S.iso.world_px(p["p"][0], p["p"][1]))
-        sy -= S.iso.elev(p["p"][0], p["p"][1])
-        add_light(int(sx), int(sy), 120, (140, 140, 140))
-        
-    # Multiply lights onto screen
-    screen.blit(light_layer, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
 
 
 def frame(S, events, dt, now):
@@ -1240,8 +1195,6 @@ def frame(S, events, dt, now):
                     apply_volume(S)
                 elif S.fps_toggle.clicked(event.pos):
                     S.fps_toggle.value = not S.fps_toggle.value
-                elif S.shaders_toggle.clicked(event.pos):
-                    S.shaders_toggle.value = not S.shaders_toggle.value
                 elif S.keybinds_btn.clicked(event.pos):
                     S.show_keys = True
                 elif S.render_dist_stepper.handle_click(event.pos):
@@ -1902,7 +1855,6 @@ def frame(S, events, dt, now):
         ], "")
         if S.voice.talking:
             draw_mic(S, screen, cfg.WIDTH - 30, 30, 20, (120, 255, 150))
-        apply_shaders(S, screen, cfg.WIDTH, cfg.HEIGHT)
         draw_chat(S, now)
 
     elif S.state == STATE_LOCAL:
@@ -1919,7 +1871,6 @@ def frame(S, events, dt, now):
         schemes = "  ".join(f"P{i+1} {SCHEMES[i][0]}" for i in range(len(S.local_players)))
         cx, cy = centroid(S.local_players)
         chat_hint = " · T chat" if len(S.local_players) == 1 else ""
-        apply_shaders(S, screen, cfg.WIDTH, cfg.HEIGHT)
         draw_world_hud(S, [f"{title}   [{S.iso.theme}]   {S.iso.scale}x",
                            f"{len(S.local_players)} rovers   X {cx:+.1f}  Y {cy:+.1f}", schemes],
                        "")
@@ -1956,7 +1907,6 @@ def frame(S, events, dt, now):
         
         S.render_dist_stepper.draw(screen, S.font, S.small_font)
         S.fps_toggle.draw(screen, S.small_font)
-        S.shaders_toggle.draw(screen, S.small_font)
         S.keybinds_btn.draw(screen, S.font)
 
         draw_text(screen, "NOW PLAYING", S.small_font, SETTINGS_RECT.centerx - 80, SETTINGS_RECT.bottom - 130, cfg.GOLD_DIM)
