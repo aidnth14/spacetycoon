@@ -1043,7 +1043,7 @@ def draw_keybinds(S, now):
         if pad and S.pad.get(pad):
             rx -= 26; screen.blit(S.pad[pad], (rx, y - 3))
         if glyph == "mic":
-            rx -= 24; draw_mic(screen, rx + 8, y + 9, 16, cfg.GOLD, active=False)
+            rx -= 24; draw_mic(S, screen, rx + 8, y + 9, 16, cfg.GOLD, active=False)
         elif glyph and S.uicons.get(glyph):
             rx -= 24; screen.blit(S.uicons[glyph], (rx, y - 1))
         y += 30
