@@ -143,26 +143,25 @@ async def handle(ws):
                     "type": "hosted", "code": code, "max_players": room["max_players"],
                     "lobby_name": room["lobby_name"], "player_count": len(room["peers"])
                 }))
-                continue
-                
-            code = gen_code()
-
-            try:
-                max_players = int(msg.get("max_players", MIN_PLAYERS))
-            except (TypeError, ValueError):
-                max_players = MIN_PLAYERS
-            max_players = max(MIN_PLAYERS, min(MAX_PLAYERS, max_players))
-            lobby_name = str(msg.get("lobby_name", "")).strip()[:MAX_LOBBY_NAME_LEN]
-
-            rooms[code] = {
-                "peers": {ws}, "host_ws": ws, "host_session": session_id, "created": time.time(), "joined": False,
-                "max_players": max_players, "lobby_name": lobby_name,
-            }
-            await ws.send(json.dumps({
-                "type": "hosted", "code": code, "max_players": max_players,
-                "lobby_name": lobby_name, "player_count": 1,
-            }))
-            log.info("room %s hosted by %s (max=%d, name=%r)", code, ip, max_players, lobby_name)
+            else:
+                code = gen_code()
+    
+                try:
+                    max_players = int(msg.get("max_players", MIN_PLAYERS))
+                except (TypeError, ValueError):
+                    max_players = MIN_PLAYERS
+                max_players = max(MIN_PLAYERS, min(MAX_PLAYERS, max_players))
+                lobby_name = str(msg.get("lobby_name", "")).strip()[:MAX_LOBBY_NAME_LEN]
+    
+                rooms[code] = {
+                    "peers": {ws}, "host_ws": ws, "host_session": session_id, "created": time.time(), "joined": False,
+                    "max_players": max_players, "lobby_name": lobby_name,
+                }
+                await ws.send(json.dumps({
+                    "type": "hosted", "code": code, "max_players": max_players,
+                    "lobby_name": lobby_name, "player_count": 1,
+                }))
+                log.info("room %s hosted by %s (max=%d, name=%r)", code, ip, max_players, lobby_name)
 
         elif msg["type"] == "join":
             code = str(msg.get("code", "")).upper()[:ROOM_CODE_LEN]
