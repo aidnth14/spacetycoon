@@ -1851,7 +1851,7 @@ def frame(S, events, dt, now):
             f"players here: {', '.join([S.username or 'You'] + [p['name'] for p in S.peers.values()])[:60]}",
         ], "")
         if S.voice.talking:
-            draw_mic(screen, cfg.WIDTH - 30, 30, 20, (120, 255, 150))
+            draw_mic(S, screen, cfg.WIDTH - 30, 30, 20, (120, 255, 150))
         draw_chat(S, now)
 
     elif S.state == STATE_LOCAL:
