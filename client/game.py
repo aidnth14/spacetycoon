@@ -162,11 +162,9 @@ def update_menu_layout(S):
     if S.menu_page == "root":
         S.MENU_FOCUS = [S.play_btn, S.settings_btn, S.quit_btn]
     elif S.menu_page == "play":
-        S.MENU_FOCUS = [S.menu_local_btn, S.menu_online_btn, S.menu_back_btn]
+        S.MENU_FOCUS = [S.menu_local_btn, S.host_local_coop_btn, S.menu_online_btn, S.menu_back_btn]
     elif S.menu_page == "online":
         S.MENU_FOCUS = [S.menu_join_btn, S.menu_host_btn, S.menu_back_btn]
-    elif S.menu_page == "host":
-        S.MENU_FOCUS = [S.host_local_coop_btn, S.host_online_coop_btn, S.menu_back_btn]
     else:
         S.menu_page = "root"
         S.MENU_FOCUS = [S.play_btn, S.settings_btn, S.quit_btn]
@@ -203,8 +201,8 @@ def _build_ui(S):
     S.play_btn = _mb("PLAY")
     S.settings_btn = _mb("SETTINGS")
     S.quit_btn = _mb("QUIT")
-    S.menu_local_btn = _mb("LOCAL")
-    S.menu_online_btn = _mb("ONLINE")
+    S.menu_local_btn = _mb("SOLO")
+    S.menu_online_btn = _mb("ONLINE CO-OP")
     S.menu_join_btn = _mb("JOIN")
     S.menu_host_btn = _mb("HOST")
     S.host_local_coop_btn = _mb("LOCAL CO-OP")
@@ -232,21 +230,15 @@ def _build_ui(S):
     # Column 1
     col1_x = SETTINGS_RECT.x + 40
     y = SETTINGS_RECT.y + 110
-    S.master_vol_slider = Slider(col1_x, y, 200, value=1.0, label="MASTER VOLUME")
-    S.volume_slider = Slider(col1_x, y + 60, 200, value=cfg.MUSIC_VOLUME, label="MUSIC")
-    S.sound_slider = Slider(col1_x, y + 120, 200, value=0.6, label="SOUND")
-    S.particles_slider = Slider(col1_x, y + 180, 200, value=0.8, label="PARTICLES")
-    S.cam_smooth_slider = Slider(col1_x, y + 240, 200, value=0.5, label="CAMERA SMOOTHING")
+    S.volume_slider = Slider(col1_x, y, 200, value=cfg.MUSIC_VOLUME, label="MUSIC")
+    S.cam_smooth_slider = Slider(col1_x, y + 80, 200, value=0.5, label="CAMERA SMOOTHING")
     
     # Column 2
     col2_x = SETTINGS_RECT.x + 320
-    S.render_dist_stepper = Stepper(col2_x, y, 200, 30, "RENDER DISTANCE", 16, 8, 32)
-    S.ui_scale_stepper = Stepper(col2_x, y + 60, 200, 30, "UI SCALE", 100, 50, 200)
-    S.chunk_sim_toggle = Toggle(col2_x, y + 120, 56, 28, "CHUNK SIMULATIONS", value=True)
-    S.fps_toggle = Toggle(col2_x, y + 180, 56, 28, "SHOW FPS", value=False)
-    S.vsync_toggle = Toggle(col2_x, y + 240, 56, 28, "V-SYNC", value=True)
+    S.render_dist_stepper = Stepper(col2_x, y, 200, 30, "RENDER DISTANCE", 6, 2, 16)
+    S.fps_toggle = Toggle(col2_x, y + 80, 56, 28, "SHOW FPS", value=False)
 
-    S.music_toggle = Toggle(col1_x, y + 300, 56, 28, "MUTE", value=False)
+    S.music_toggle = Toggle(col1_x, y + 160, 56, 28, "MUTE", value=False)
     S.keybinds_btn = Button(col2_x, y + 295, 200, 36, "KEYBINDS")
 
     transport_y = SETTINGS_RECT.y + 460
@@ -372,7 +364,7 @@ def activate_focused(S):
     widget = S.MENU_FOCUS[S.focus_index]
     if widget is getattr(S, "settings_btn", None):
         return "settings"
-    elif widget is getattr(S, "help_btn", None):
+    elif widget is getattr(S, "help_icon_btn", None):
         return "help"
     elif widget is getattr(S, "quit_btn", None):
         return "quit"
@@ -388,16 +380,11 @@ def activate_focused(S):
     elif widget is getattr(S, "menu_join_btn", None):
         go_setup(S, "join")
     elif widget is getattr(S, "menu_host_btn", None):
-        S.menu_page = "host"
-        update_menu_layout(S)
+        start_wake_server(S)
     elif widget is getattr(S, "host_local_coop_btn", None):
         go_setup(S, "local")
-    elif widget is getattr(S, "host_online_coop_btn", None):
-        start_wake_server(S)
     elif widget is getattr(S, "menu_back_btn", None):
-        if S.menu_page == "host":
-            S.menu_page = "online"
-        elif S.menu_page == "online":
+        if S.menu_page == "online":
             S.menu_page = "play"
         elif S.menu_page == "play":
             S.menu_page = "root"
@@ -415,13 +402,17 @@ def start_wake_server(S):
         http_url = cfg.DEFAULT_SERVER.replace("wss://", "https://").replace("ws://", "http://")
         try:
             urllib.request.urlopen(http_url, timeout=45)
+            S.server_woken = True
         except urllib.error.HTTPError as e:
-            pass  # 426 Upgrade Required means it's awake!
+            if e.code == 426:
+                S.server_woken = True
+            else:
+                S.server_wake_failed = True
         except Exception as e:
-            pass  # We will let the network layer handle actual failures
-        S.server_woken = True
+            S.server_wake_failed = True
         
     S.server_woken = False
+    S.server_wake_failed = False
     import threading
     threading.Thread(target=_ping_server, daemon=True).start()
 
@@ -613,7 +604,7 @@ def visible_cells(S):
     else:
         pts = S.local_players
     cells = set()
-    R, R2 = REVEAL_RADIUS, REVEAL_RADIUS * REVEAL_RADIUS
+    R = S.render_dist_stepper.value; R2 = R * R
     for p in pts:
         cx, cy = round(p[0]), round(p[1])
         for dx in range(-R, R + 1):
@@ -719,7 +710,7 @@ def follow_camera(S, fx, fy, dt):
     wx, wy = S.iso.world_px(fx, fy)
     tx = wx - cfg.WIDTH // 2
     ty = wy - cfg.HEIGHT // 2
-    k = min(1.0, CAM_SMOOTH * dt)
+    k = min(1.0, (1.0 + S.cam_smooth_slider.value * 11.0) * dt)
     S.iso.cam_x += (tx - S.iso.cam_x) * k
     S.iso.cam_y += (ty - S.iso.cam_y) * k
 
@@ -882,7 +873,7 @@ def cursor_kind(S):
     mp = pygame.mouse.get_pos()
     hot = lambda rects: any(r.collidepoint(mp) for r in rects)
     if S.show_settings:
-        if S.volume_slider.dragging or S.sound_slider.dragging:
+        if S.volume_slider.dragging or S.cam_smooth_slider.dragging:
             return "grab"
         return "point" if hot([S.volume_slider.rect, S.sound_slider.rect,
                                 S.music_toggle.rect, S.prev_btn.rect, S.play_pause_btn.rect,
@@ -1193,11 +1184,7 @@ def frame(S, events, dt, now):
 
         if S.show_settings:
             if event.type == pygame.MOUSEBUTTONDOWN:
-                grabbed = (S.master_vol_slider.handle_mousedown(event.pos)
-                           or S.volume_slider.handle_mousedown(event.pos)
-                           or S.sound_slider.handle_mousedown(event.pos)
-                           or S.particles_slider.handle_mousedown(event.pos)
-                           or S.cam_smooth_slider.handle_mousedown(event.pos))
+                grabbed = (S.volume_slider.handle_mousedown(event.pos) or S.cam_smooth_slider.handle_mousedown(event.pos))
                 if grabbed:
                     apply_volume(S)
                 elif S.settings_x.clicked(event.pos) or S.settings_close_btn.clicked(event.pos) \
@@ -1206,17 +1193,11 @@ def frame(S, events, dt, now):
                 elif S.music_toggle.clicked(event.pos):
                     S.music_toggle.value = not S.music_toggle.value
                     apply_volume(S)
-                elif S.chunk_sim_toggle.clicked(event.pos):
-                    S.chunk_sim_toggle.value = not S.chunk_sim_toggle.value
                 elif S.fps_toggle.clicked(event.pos):
                     S.fps_toggle.value = not S.fps_toggle.value
-                elif S.vsync_toggle.clicked(event.pos):
-                    S.vsync_toggle.value = not S.vsync_toggle.value
                 elif S.keybinds_btn.clicked(event.pos):
                     S.show_keys = True
                 elif S.render_dist_stepper.handle_click(event.pos):
-                    pass
-                elif S.ui_scale_stepper.handle_click(event.pos):
                     pass
                 elif S.prev_btn.clicked(event.pos):
                     play_prev_track(S)
@@ -1225,18 +1206,12 @@ def frame(S, events, dt, now):
                 elif S.next_btn.clicked(event.pos):
                     play_next_track(S)
             elif event.type == pygame.MOUSEBUTTONUP:
-                S.master_vol_slider.handle_mouseup()
                 S.volume_slider.handle_mouseup()
-                S.sound_slider.handle_mouseup()
-                S.particles_slider.handle_mouseup()
                 S.cam_smooth_slider.handle_mouseup()
             elif event.type == pygame.MOUSEMOTION:
-                S.master_vol_slider.handle_mousemotion(event.pos)
                 S.volume_slider.handle_mousemotion(event.pos)
-                S.sound_slider.handle_mousemotion(event.pos)
-                S.particles_slider.handle_mousemotion(event.pos)
                 S.cam_smooth_slider.handle_mousemotion(event.pos)
-                if S.master_vol_slider.dragging or S.volume_slider.dragging or S.sound_slider.dragging:
+                if S.volume_slider.dragging or S.cam_smooth_slider.dragging:
                     apply_volume(S)
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 S.show_settings = False
@@ -1307,9 +1282,7 @@ def frame(S, events, dt, now):
                 elif res == "quit":
                     running = False
             elif event.key == pygame.K_ESCAPE and getattr(S, "menu_page", "root") != "root":
-                if S.menu_page == "host":
-                    S.menu_page = "online"
-                elif S.menu_page == "online":
+                if S.menu_page == "online":
                     S.menu_page = "play"
                 elif S.menu_page == "play":
                     S.menu_page = "root"
@@ -1422,6 +1395,8 @@ def frame(S, events, dt, now):
     if S.state == STATE_WAKE:
         if S.server_woken:
             go_setup(S, "host")
+        elif getattr(S, "server_wake_failed", False):
+            reset_to_menu(S, "Could not reach server.")
 
     # --- keep the playlist cycling ---
     # the MUSIC_END_EVENT above handles it on most builds, but some SDL setups
@@ -1436,32 +1411,57 @@ def frame(S, events, dt, now):
             msg = S.conn.incoming.get_nowait()
             t = msg.get("type")
             if t == "hosted":
-                S.room_code = msg["code"]
-                S.lobby_name = msg.get("lobby_name", "")
-                S.max_players = msg.get("max_players", 2)
-                S.player_count = msg.get("player_count", 1)
-                S.status_msg = "Room created — waiting for your friend..."
-                S.last_pong_time = now
+                if getattr(S, "is_host", False) and S.room_code == msg["code"]:
+                    # Reconnected
+                    if S.state == STATE_WAIT:
+                        S.conn.send({"type": "lobby_state", "players": getattr(S, "lobby_players", {})})
+                    else:
+                        S.conn.send({"type": "lobby_start"})
+                else:
+                    S.is_host = True
+                    S.room_code = msg["code"]
+                    S.lobby_name = msg.get("lobby_name", "")
+                    S.max_players = msg.get("max_players", 2)
+                    S.player_count = msg.get("player_count", 1)
+                    S.status_msg = "Room created — waiting for your friend..."
+                    S.last_pong_time = now
+                    S.lobby_players = {
+                        S.client_id: {
+                            "name": S.username,
+                            "profile": "Pilot",
+                            "skin": "Default",
+                            "color": list(color_for(S.username)),
+                            "ready": False,
+                            "restricted": False,
+                            "is_host": True,
+                            "disconnected": False,
+                            "last_seen": now
+                        }
+                    }
+                    S.state = STATE_WAIT
             elif t == "joined":
-                S.is_host = False
-                S.room_code = msg["code"]
-                S.lobby_name = msg.get("lobby_name", "")
-                S.max_players = msg.get("max_players", 2)
-                S.player_count = msg.get("player_count", 2)
-                S.last_pong_time = now
-                S.status_msg = "Joined — waiting for host..."
-                try:
-                    S.conn.send({
-                        "type": "lobby_hello", 
-                        "id": S.client_id,
-                        "name": S.username,
-                        "profile": "Pilot",
-                        "skin": "Default",
-                        "color": list(color_for(S.username))
-                    })
-                except:
+                if S.room_code == msg.get("code") and not getattr(S, "is_host", True):
+                    # Reconnected
                     pass
+                else:
+                    S.is_host = False
+                    S.room_code = msg["code"]
+                    S.lobby_name = msg.get("lobby_name", "")
+                    S.max_players = msg.get("max_players", 2)
+                    S.player_count = msg.get("player_count", 2)
+                    S.last_pong_time = now
                     S.status_msg = "Joined — waiting for host..."
+                    try:
+                        S.conn.send({
+                            "type": "lobby_hello", 
+                            "id": S.client_id,
+                            "name": S.username,
+                            "profile": "Pilot",
+                            "skin": "Default",
+                            "color": list(color_for(S.username))
+                        })
+                    except Exception:
+                        pass
             elif t == "peer_joined":
                 S.player_count = msg.get("player_count", S.player_count + 1)
                 S.status_msg = "Peer connected!"
@@ -1485,7 +1485,9 @@ def frame(S, events, dt, now):
                             dist = (dx**2 + dy**2)**0.5
                             speed = dist / dt
                             # Allow up to 600 pixels/sec (SPEED is ~180, plus lag tolerance)
-                            if speed > 600:
+                            # Check if restricted
+                            is_restricted = getattr(S, "lobby_players", {}).get(pid, {}).get("restricted", False)
+                            if speed > 600 or is_restricted:
                                 # Rubberband them back to old position!
                                 S.conn.send({"type": "force_pos", "target": pid, "x": old_pr["p"][0], "y": old_pr["p"][1], "z": old_pr["p"][2]})
                                 continue  # Ignore this illegal update
@@ -1588,7 +1590,8 @@ def frame(S, events, dt, now):
         prune_peers(S, now)
         # walk the shared map; WASD + arrows both drive your own avatar
         keys = pygame.key.get_pressed()
-        if not S.chat_open and not getattr(S, "paused", False):
+        my_info = getattr(S, "lobby_players", {}).get(S.client_id, {})
+        if not S.chat_open and not getattr(S, "paused", False) and not my_info.get("restricted"):
             up = keys[pygame.K_w] or keys[pygame.K_UP]
             down = keys[pygame.K_s] or keys[pygame.K_DOWN]
             left = keys[pygame.K_a] or keys[pygame.K_LEFT]
@@ -1629,8 +1632,7 @@ def frame(S, events, dt, now):
         for i in range(len(S.local_players)):
             p = S.local_players[i]
             scheme, up, down, left, right, color, jump = SCHEMES[i]
-            my_info = getattr(S, "lobby_players", {}).get(S.client_id, {})
-            if getattr(S, "paused", False) or S.chat_open or my_info.get("restricted"):
+            if getattr(S, "paused", False) or S.chat_open:
                 iso_move(S, p, False, False, False, False, False, dt)
             else:
                 dash = False # We can map dash to a specific key per player if we want, or just let them jump
@@ -1894,7 +1896,7 @@ def frame(S, events, dt, now):
         draw_text(screen, "SETTINGS", S.big_font, 0, SETTINGS_RECT.y + 24, cfg.GOLD, center_x=CENTER_X)
         draw_divider(screen, SETTINGS_RECT.x + 30, SETTINGS_RECT.y + 66, SETTINGS_RECT.w - 60)
 
-        for slider in (S.master_vol_slider, S.volume_slider, S.sound_slider, S.particles_slider, S.cam_smooth_slider):
+        for slider in (S.volume_slider, S.cam_smooth_slider):
             slider.draw(screen, S.font, S.small_font)
         
         # We manually aligned the sliders, let's just place the icons dynamically or near music/sound
@@ -1906,10 +1908,7 @@ def frame(S, events, dt, now):
         S.music_toggle.draw(screen, S.small_font)
         
         S.render_dist_stepper.draw(screen, S.font, S.small_font)
-        S.ui_scale_stepper.draw(screen, S.font, S.small_font)
-        S.chunk_sim_toggle.draw(screen, S.small_font)
         S.fps_toggle.draw(screen, S.small_font)
-        S.vsync_toggle.draw(screen, S.small_font)
         S.keybinds_btn.draw(screen, S.font)
 
         draw_text(screen, "NOW PLAYING", S.small_font, SETTINGS_RECT.centerx - 80, SETTINGS_RECT.bottom - 130, cfg.GOLD_DIM)
@@ -1930,5 +1929,8 @@ def frame(S, events, dt, now):
         draw_text(screen, "↻ hot-reloaded", S.small_font, 16, cfg.HEIGHT - 32, cfg.GREEN)
 
     draw_cursor(S, now)  # custom pixel cursor, always on top
+
+    if getattr(S, "fps_toggle", None) and getattr(S.fps_toggle, "value", False):
+        draw_text(screen, f"FPS: {int(1.0/max(0.001, dt))}", S.font, 10, 10, cfg.GREEN)
 
     return running

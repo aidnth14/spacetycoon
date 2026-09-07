@@ -1,14 +1,18 @@
 import re
+
 with open("client/game.py", "r") as f:
     src = f.read()
 
-hosted_logic = """            elif t == "hosted":
+# We need to replace from `if t == "hosted":` all the way down to `elif t == "peer_joined":`
+pattern = r'            if t == "hosted":.*?elif t == "peer_joined":'
+
+replacement = """            if t == "hosted":
                 if getattr(S, "is_host", False) and S.room_code == msg["code"]:
-                    # Reconnected!
+                    # Reconnected
                     if S.state == STATE_WAIT:
                         S.conn.send({"type": "lobby_state", "players": getattr(S, "lobby_players", {})})
                     else:
-                        S.conn.send({"type": "lobby_start"}) # remind peers we are in game
+                        S.conn.send({"type": "lobby_start"})
                 else:
                     S.is_host = True
                     S.room_code = msg["code"]
@@ -25,16 +29,14 @@ hosted_logic = """            elif t == "hosted":
                             "color": list(color_for(S.username)),
                             "ready": False,
                             "restricted": False,
-                            "is_host": True
+                            "is_host": True,
+                            "disconnected": False,
+                            "last_seen": now
                         }
                     }
                     S.state = STATE_WAIT
-"""
-src = re.sub(r'            elif t == "hosted":\n(?:.*?\n)+?                    S\.state = STATE_WAIT\n', hosted_logic, src)
-
-# Same for joined
-joined_logic = """            elif t == "joined":
-                if S.room_code == msg["code"] and not getattr(S, "is_host", True):
+            elif t == "joined":
+                if S.room_code == msg.get("code") and not getattr(S, "is_host", True):
                     # Reconnected
                     pass
                 else:
@@ -54,10 +56,15 @@ joined_logic = """            elif t == "joined":
                             "skin": "Default",
                             "color": list(color_for(S.username))
                         })
-                    except:
+                    except Exception:
                         pass
-"""
-src = re.sub(r'            elif t == "joined":\n(?:.*?\n)+?                        pass\n', joined_logic, src)
+            elif t == "peer_joined":"""
+
+new_src, count = re.subn(pattern, replacement, src, flags=re.DOTALL)
+if count != 1:
+    print(f"FAILED: Expected 1 match, found {count}")
+    exit(1)
 
 with open("client/game.py", "w") as f:
-    f.write(src)
+    f.write(new_src)
+print("SUCCESS")

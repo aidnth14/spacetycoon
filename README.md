@@ -12,12 +12,12 @@ client/            pygame app (host/join UI, live RTT test, settings, gamepad)
   network.py       websocket connection handling + public-DNS fallback
   ui.py            widgets: starfield, freighter flyby, buttons, sliders, cards
   config.py        colors, layout, timeouts, music tracks
-  assets/          synthesized lobby soundtrack (.wav) + icons
+  assets/          synthesized lobby soundtrack (.mp3) + icons
 
-server/            relay server (deployed on Fly.io)
+server/            relay server (deployed on Render.com)
   server.py        room-code relay with rate limiting / abuse protection
   Dockerfile
-  fly.toml
+  render.yaml
 ```
 
 ## Running the client
@@ -46,11 +46,9 @@ Listens on `ws://0.0.0.0:8080`.
 ## Deploying the server
 
 ```
-cd server
-fly deploy
-```
+The server is deployed via Render Blueprint (`render.yaml`). Every push to the `master` branch auto-deploys.
 
-Live instance: `wss://spacetycoon-relay.fly.dev`
+Live instance: `wss://spacetycoon-relay.onrender.com`
 
 ## Features
 

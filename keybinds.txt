@@ -1,33 +1,37 @@
 SPACE TYCOON — CONTROLS
 =======================
 
-MOUSE + KEYBOARD
-----------------
-Click server address field      Focus it, type to edit
-Click room code field           Focus it, type to edit (JOIN only)
-Backspace                       Delete last character in focused field
-Click gear icon                 Open settings panel
-Click HOST                      Create a room, get a room code
-Click JOIN                      Join a room using the entered code
-Esc                             Close settings panel (when open)
+MENU & NAVIGATION
+-----------------
+Left Click            Select buttons, text fields, or settings
+Escape                Go back, open/close pause menu
+Enter                 Confirm selections
 
-GAMEPAD (any standard Xbox/PlayStation-layout controller)
-----------------------------------------------------------
-D-pad / left stick left-right   Move focus between gear / HOST / JOIN
-A button                        Confirm focused action
-B button                        Close settings panel
+IN-GAME (ONLINE / SOLO)
+-----------------------
+W A S D               Move (or use Arrow Keys)
+L-Shift               Dash (Cooldown)
+Space                 Jump
+T or Enter            Open text chat (type message, press Enter to send, Esc to cancel)
+V (Hold)              Push-to-Talk Voice Chat
+Tab                   Cycle world rendering styles / palettes
+R                     Regenerate world layout
+- / =                 Zoom Out / Zoom In
 
-  Settings panel open:
-D-pad / left stick left-right   Adjust music volume (±5%)
-A button                        Toggle music mute on/off
-B button                        Close settings panel
+IN-GAME (LOCAL CO-OP)
+---------------------
+Player 1: W A S D     (Move)   | Space  (Jump)
+Player 2: Arrows      (Move)   | RShift (Jump)
+Player 3: I J K L     (Move)   | O      (Jump)
+Player 4: T F G H     (Move)   | Y      (Jump)
 
-Gamepads are hot-pluggable — connect at any time, no restart needed.
-Text fields (server address, room code) are mouse/keyboard only; there's
-no on-screen keyboard for controller text entry.
-
-SETTINGS PANEL
+DEBUG & ENGINE
 --------------
-Music volume slider    Drag the handle, or click anywhere on the track
-Music toggle            Click to mute/unmute (keeps your volume level)
-CLOSE button            Or click outside the panel, or press Esc
+F1                    Toggle Debug Info (If implemented)
+F2                    Force regenerate soundtrack (Assets)
+
+GAMEPAD (Xbox / PlayStation style)
+----------------------------------
+D-Pad / L-Stick       Move menu focus
+A Button              Confirm
+B Button              Go back / close menus
