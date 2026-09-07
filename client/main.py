@@ -195,4 +195,4 @@ finally:
     if getattr(S, "voice", None):
         S.voice.close()
     pygame.quit()
-    sys.exit(1 if not running else 0)
+    sys.exit(0 if not running else 1)
