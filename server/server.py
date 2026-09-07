@@ -218,7 +218,16 @@ async def handle(ws):
         if room:
             room["peers"].discard(ws)
             if ws == room.get("host_ws"):
-                room["host_ws"] = None
+                if room["peers"]:
+                    new_host = next(iter(room["peers"]))
+                    room["host_ws"] = new_host
+                    try:
+                        import asyncio
+                        asyncio.create_task(new_host.send(json.dumps({"type": "promote_to_host"})))
+                    except:
+                        pass
+                else:
+                    room["host_ws"] = None
             if not room["peers"]:
                 if code in rooms:
                     del rooms[code]

@@ -1473,6 +1473,23 @@ def frame(S, events, dt, now):
                 pid = msg.get("id", msg.get("name", "peer"))
                 nm = msg.get("name", "Peer") or "Peer"
                 col = tuple(msg["color"]) if msg.get("color") else color_for(nm)
+                
+                # --- ANTI-CHEAT (HOST AUTHORITATIVE PHYSICS) ---
+                if getattr(S, "is_host", False) and pid != S.client_id:
+                    old_pr = getattr(S, "peers", {}).get(pid)
+                    if old_pr:
+                        dt = now - old_pr["seen"]
+                        if dt > 0:
+                            dx = msg["x"] - old_pr["p"][0]
+                            dy = msg["y"] - old_pr["p"][1]
+                            dist = (dx**2 + dy**2)**0.5
+                            speed = dist / dt
+                            # Allow up to 600 pixels/sec (SPEED is ~180, plus lag tolerance)
+                            if speed > 600:
+                                # Rubberband them back to old position!
+                                S.conn.send({"type": "force_pos", "target": pid, "x": old_pr["p"][0], "y": old_pr["p"][1], "z": old_pr["p"][2]})
+                                continue  # Ignore this illegal update
+
                 S.peers[pid] = {"p": [msg["x"], msg["y"], msg.get("z", 0.0)],
                                 "name": nm, "color": col, "seen": now}
             elif t == "lobby_hello" and S.is_host:
@@ -1503,6 +1520,17 @@ def frame(S, events, dt, now):
                     reset_to_menu(S, "You were kicked by the host.")
             elif t == "lobby_start":
                 S.state = STATE_TEST
+            elif t == "promote_to_host":
+                S.is_host = True
+                my_info = getattr(S, "lobby_players", {}).get(S.client_id)
+                if my_info:
+                    my_info["is_host"] = True
+                S.conn.send({"type": "lobby_state", "players": getattr(S, "lobby_players", {})})
+            elif t == "force_pos":
+                if msg.get("target") == S.client_id:
+                    S.me[0] = msg["x"]
+                    S.me[1] = msg["y"]
+                    S.me[2] = msg.get("z", 0.0)
             elif t == "lobby_ping":
                 S.conn.send({"type": "lobby_pong", "id": S.client_id})
             elif t == "lobby_pong":
