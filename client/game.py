@@ -299,7 +299,16 @@ def init(S):
     # chat (Minecraft-style) + push-to-talk voice
     S.chat_open = False
     S.chat_input = ""
-    S.chat_log = []               # list of {"t":ts, "name":str, "color":rgb, "text":str}
+    S.chat_log = []
+    S.lobby_players = {}
+    S.is_host = False
+    S.lobby_ready = False
+    S.lobby_start_btn = None
+    S.lobby_ready_btn = None
+    S.lobby_kick_btns = {}
+    S.lobby_restrict_btns = {}
+    S.lobby_player_list = []
+               # list of {"t":ts, "name":str, "color":rgb, "text":str}
     S.voice = voicelib.Voice()
     S.show_keys = False           # keybinds panel
     load_game_icons(S)
@@ -1253,6 +1262,37 @@ def frame(S, events, dt, now):
             continue  # freeze all other in-world input while paused
 
         # --- MAIN menu: keyboard nav (Up/Down + Enter) drives the cursor ---
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if S.state == STATE_WAIT:
+                pos = event.pos
+                if S.lobby_ready_btn and S.lobby_ready_btn.rect.collidepoint(pos):
+                    # Toggle ready if not restricted
+                    my_info = S.lobby_players.get(S.client_id, {})
+                    if not my_info.get("restricted", False):
+                        is_ready = my_info.get("ready", False)
+                        if S.is_host:
+                            S.lobby_players[S.client_id]["ready"] = not is_ready
+                            S.conn.send({"type": "lobby_state", "players": S.lobby_players})
+                        else:
+                            S.conn.send({"type": "lobby_action", "id": S.client_id, "action": "ready", "value": not is_ready})
+                if S.is_host and S.lobby_start_btn and S.lobby_start_btn.rect.collidepoint(pos):
+                    # Check if all ready
+                    if all(p.get("ready") for p in S.lobby_players.values()):
+                        S.conn.send({"type": "lobby_start"})
+                        S.state = STATE_TEST
+                if S.is_host:
+                    for pid, btn in S.lobby_kick_btns.items():
+                        if btn.rect.collidepoint(pos):
+                            if pid in S.lobby_players:
+                                del S.lobby_players[pid]
+                                S.conn.send({"type": "lobby_state", "players": S.lobby_players})
+                    for pid, btn in S.lobby_restrict_btns.items():
+                        if btn.rect.collidepoint(pos):
+                            if pid in S.lobby_players:
+                                S.lobby_players[pid]["restricted"] = not S.lobby_players[pid].get("restricted", False)
+                                if S.lobby_players[pid]["restricted"]:
+                                    S.lobby_players[pid]["ready"] = False
+                                S.conn.send({"type": "lobby_state", "players": S.lobby_players})
         if event.type == pygame.KEYDOWN and S.state == STATE_MENU:
             if event.key in (pygame.K_DOWN, pygame.K_s):
                 S.focus_index = (S.focus_index + 1) % len(S.MENU_FOCUS)
@@ -1403,20 +1443,28 @@ def frame(S, events, dt, now):
                 S.status_msg = "Room created — waiting for your friend..."
                 S.last_pong_time = now
             elif t == "joined":
+                S.is_host = False
                 S.room_code = msg["code"]
                 S.lobby_name = msg.get("lobby_name", "")
                 S.max_players = msg.get("max_players", 2)
                 S.player_count = msg.get("player_count", 2)
                 S.last_pong_time = now
-                if S.player_count > 1:
-                    S.status_msg = "Connected!"
-                    S.state = STATE_TEST
-                else:
+                S.status_msg = "Joined — waiting for host..."
+                try:
+                    S.conn.send({
+                        "type": "lobby_hello", 
+                        "id": S.client_id,
+                        "name": S.username,
+                        "profile": "Pilot",
+                        "skin": "Default",
+                        "color": list(color_for(S.username))
+                    })
+                except:
+                    pass
                     S.status_msg = "Joined — waiting for host..."
             elif t == "peer_joined":
                 S.player_count = msg.get("player_count", S.player_count + 1)
                 S.status_msg = "Peer connected!"
-                S.state = STATE_TEST
                 S.last_pong_time = now
             elif t == "peer_left":
                 S.player_count = msg.get("player_count", max(1, S.player_count - 1))
@@ -1427,6 +1475,39 @@ def frame(S, events, dt, now):
                 col = tuple(msg["color"]) if msg.get("color") else color_for(nm)
                 S.peers[pid] = {"p": [msg["x"], msg["y"], msg.get("z", 0.0)],
                                 "name": nm, "color": col, "seen": now}
+            elif t == "lobby_hello" and S.is_host:
+                pid = msg["id"]
+                S.lobby_players[pid] = {
+                    "name": msg["name"],
+                    "profile": msg.get("profile", "Pilot"),
+                    "skin": msg.get("skin", "Default"),
+                    "color": msg.get("color", [255,255,255]),
+                    "ready": False,
+                    "restricted": False,
+                    "is_host": False,
+                    "last_seen": now
+                }
+                S.conn.send({"type": "lobby_state", "players": S.lobby_players})
+            elif t == "lobby_action":
+                if S.is_host:
+                    pid = msg.get("id")
+                    if pid in S.lobby_players and not S.lobby_players[pid]["restricted"]:
+                        if msg.get("action") == "ready":
+                            S.lobby_players[pid]["ready"] = bool(msg.get("value"))
+                        S.conn.send({"type": "lobby_state", "players": S.lobby_players})
+            elif t == "lobby_state":
+                S.lobby_players = msg.get("players", {})
+                if S.client_id not in S.lobby_players:
+                    reset_to_menu(S, "You were kicked by the host.")
+            elif t == "lobby_start":
+                S.state = STATE_TEST
+            elif t == "lobby_ping":
+                S.conn.send({"type": "lobby_pong", "id": S.client_id})
+            elif t == "lobby_pong":
+                if S.is_host:
+                    pid = msg.get("id")
+                    if pid in getattr(S, "lobby_players", {}):
+                        S.lobby_players[pid]["last_seen"] = now
             elif t == "chat":
                 nm = msg.get("name", "Peer") or "Peer"
                 col = tuple(msg["color"]) if msg.get("color") else color_for(nm)
@@ -1437,13 +1518,11 @@ def frame(S, events, dt, now):
             elif t == "ping":
                 S.conn.send({"type": "pong", "t": msg["t"]})
                 S.pong_count += 1
-                if S.state == STATE_WAIT:
-                    S.state = STATE_TEST
+
             elif t == "pong":
                 S.last_rtt = (now - msg["t"]) * 1000
                 S.last_pong_time = now
-                if S.state == STATE_WAIT:
-                    S.state = STATE_TEST
+
             elif t == "error":
                 reset_to_menu(S, f"Error: {msg['msg']}")
             elif t == "connect_error":
@@ -1454,6 +1533,20 @@ def frame(S, events, dt, now):
                     reset_to_menu(S, f"Disconnected from server ({err}).")
     except queue.Empty:
         pass
+
+    if S.state == STATE_WAIT and S.is_host:
+        if now - getattr(S, "last_lobby_ping", 0) > 2.0:
+            S.conn.send({"type": "lobby_ping"})
+            S.last_lobby_ping = now
+            changed = False
+            for pid, p in S.lobby_players.items():
+                if not p.get("is_host") and now - p.get("last_seen", now) > 6.0:
+                    if not p.get("disconnected"):
+                        p["disconnected"] = True
+                        p["ready"] = False
+                        changed = True
+            if changed:
+                S.conn.send({"type": "lobby_state", "players": S.lobby_players})
 
     if S.state == STATE_TEST:
         prune_peers(S, now)
@@ -1475,7 +1568,8 @@ def frame(S, events, dt, now):
                 S.conn.send({"type": "voice", "d": chunk})
             except Exception:
                 pass
-        if now - S.last_pos_sent > 1.0 / POS_SEND_HZ:
+        my_info = getattr(S, "lobby_players", {}).get(S.client_id, {})
+        if not my_info.get("restricted") and now - S.last_pos_sent > 1.0 / POS_SEND_HZ:
             try:
                 S.conn.send({"type": "pos", "id": S.client_id, "name": S.username,
                              "color": list(color_for(S.username)),
@@ -1499,7 +1593,8 @@ def frame(S, events, dt, now):
         for i in range(len(S.local_players)):
             p = S.local_players[i]
             scheme, up, down, left, right, color, jump = SCHEMES[i]
-            if getattr(S, "paused", False) or S.chat_open:
+            my_info = getattr(S, "lobby_players", {}).get(S.client_id, {})
+            if getattr(S, "paused", False) or S.chat_open or my_info.get("restricted"):
                 iso_move(S, p, False, False, False, False, False, dt)
             else:
                 dash = False # We can map dash to a specific key per player if we want, or just let them jump
@@ -1622,20 +1717,80 @@ def frame(S, events, dt, now):
 
     elif S.state == STATE_WAIT:
         draw_header(S, S.lobby_name if S.lobby_name else "Standing By")
-        draw_wrapped_text(screen, S.status_msg, S.body_font, CARD_Y + 50,
-                          cfg.CARD_W - PAD * 2, cfg.WHITE, center_x=CENTER_X)
         if S.room_code:
-            draw_text(screen, f"{S.player_count}/{S.max_players} PLAYERS — SHARE THIS CODE",
-                      S.small_font, 0, CARD_Y + 120, cfg.GOLD_DIM, center_x=CENTER_X)
-            box_w, box_h = 260, 90
-            box = pygame.Rect(CENTER_X - box_w // 2, CARD_Y + 150, box_w, box_h)
+            draw_text(screen, f"{len(S.lobby_players)}/{S.max_players} PLAYERS — SHARE THIS CODE",
+                      S.small_font, 0, CARD_Y + 40, cfg.GOLD_DIM, center_x=CENTER_X)
+            box_w, box_h = 220, 60
+            box = pygame.Rect(CENTER_X - box_w // 2, CARD_Y + 60, box_w, box_h)
             alpha = pulse_alpha(now)
-            pygame.draw.rect(screen, cfg.INPUT_BG, box, border_radius=12)
-            pygame.draw.rect(screen, cfg.GOLD, box, 2, border_radius=12)
-            code_surf = S.code_font.render(S.room_code, True, cfg.WHITE)
+            pygame.draw.rect(screen, cfg.INPUT_BG, box, border_radius=8)
+            pygame.draw.rect(screen, cfg.GOLD, box, 2, border_radius=8)
+            code_surf = S.big_font.render(S.room_code, True, cfg.WHITE)
             code_surf.set_alpha(alpha)
             screen.blit(code_surf, (box.centerx - code_surf.get_width() // 2,
                                     box.centery - code_surf.get_height() // 2))
+            
+            # Draw lobby players
+            py = CARD_Y + 140
+            
+            # Recreate buttons dicts for click handling
+            S.lobby_kick_btns = {}
+            S.lobby_restrict_btns = {}
+            
+            all_ready = len(S.lobby_players) > 0
+            
+            # Use fixed order for players
+            for pid, p in S.lobby_players.items():
+                is_me = (pid == S.client_id)
+                prof, skin, col, nm = p.get("profile", "Pilot"), p.get("skin", "Default"), p.get("color", [255,255,255]), p.get("name", "Unknown")
+                status = "HOST" if p.get("is_host") else ("DISCONNECTED" if p.get("disconnected") else ("RESTRICTED" if p.get("restricted") else ("READY" if p.get("ready") else "NOT READY")))
+                
+                if not p.get("ready") and not p.get("is_host") and not p.get("restricted"):
+                    all_ready = False
+                
+                # Format: [Profile] / [Skin] / [Colour] — [Name] — [Status]
+                color_hex = f"#{col[0]:02X}{col[1]:02X}{col[2]:02X}"
+                txt = f"[{prof}] / [{skin}] / [{color_hex}] — {nm}"
+                
+                if is_me: txt = ">> " + txt
+                
+                status_color = cfg.GREEN if status == "READY" else (cfg.RED if status in ("RESTRICTED", "KICKED") else cfg.WHITE)
+                
+                # Draw text and status
+                draw_text(screen, txt, S.small_font, CENTER_X - 280, py, col)
+                draw_text(screen, status, S.small_font, CENTER_X + 80, py, status_color)
+                
+                # If host, draw host controls for OTHER players
+                if S.is_host and not p.get("is_host"):
+                    # KICK button
+                    kx, ky = CENTER_X + 180, py - 6
+                    kick_btn = Button(kx, ky, 50, 24, "KICK", palette={"fill": cfg.RED, "border": cfg.RED})
+                    S.lobby_kick_btns[pid] = kick_btn
+                    kick_btn.draw(screen, S.small_font)
+                    # RESTRICT button
+                    rx, ry = kx + 60, ky
+                    rlabel = "UNRESTRICT" if p.get("restricted") else "RESTRICT"
+                    rbg = cfg.GREEN if p.get("restricted") else (200, 100, 20)
+                    r_btn = Button(rx, ry, 100, 24, rlabel, palette={"fill": rbg, "border": rbg})
+                    S.lobby_restrict_btns[pid] = r_btn
+                    r_btn.draw(screen, S.small_font)
+                    
+                py += 35
+                
+            # Draw my ready button
+            my_info = S.lobby_players.get(S.client_id, {})
+            if my_info and not my_info.get("is_host") and not my_info.get("restricted"):
+                ready_label = "NOT READY" if my_info.get("ready") else "READY"
+                ready_bg = (100, 100, 100) if my_info.get("ready") else cfg.GREEN
+                S.lobby_ready_btn = Button(CENTER_X - 60, cfg.HEIGHT - 120, 120, 40, ready_label, palette={"fill": ready_bg, "border": ready_bg})
+                S.lobby_ready_btn.draw(screen, S.small_font)
+                
+            # Draw host START GAME button
+            if S.is_host:
+                start_bg = cfg.GREEN if all_ready else (100, 100, 100)
+                S.lobby_start_btn = Button(CENTER_X - 80, cfg.HEIGHT - 120, 160, 40, "START GAME", palette={"fill": start_bg, "border": start_bg})
+                S.lobby_start_btn.draw(screen, S.small_font)
+                
         else:
             draw_text(screen, "Reaching relay server...", S.small_font,
                       0, CARD_Y + 130, cfg.GOLD_DIM, center_x=CENTER_X)
