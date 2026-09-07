@@ -131,7 +131,22 @@ async def handle(ws):
 
         if msg["type"] == "host":
             sweep_stale_rooms()
+            session_id = msg.get("session_id")
+            code = msg.get("room_code")
+            
+            # Reclaiming an existing room
+            if code and code in rooms and rooms[code].get("host_session") == session_id:
+                room = rooms[code]
+                room["host_ws"] = ws
+                room["peers"].add(ws)
+                await ws.send(json.dumps({
+                    "type": "hosted", "code": code, "max_players": room["max_players"],
+                    "lobby_name": room["lobby_name"], "player_count": len(room["peers"])
+                }))
+                continue
+                
             code = gen_code()
+
             try:
                 max_players = int(msg.get("max_players", MIN_PLAYERS))
             except (TypeError, ValueError):
@@ -140,7 +155,7 @@ async def handle(ws):
             lobby_name = str(msg.get("lobby_name", "")).strip()[:MAX_LOBBY_NAME_LEN]
 
             rooms[code] = {
-                "peers": {ws}, "host_ws": ws, "created": time.time(), "joined": False,
+                "peers": {ws}, "host_ws": ws, "host_session": session_id, "created": time.time(), "joined": False,
                 "max_players": max_players, "lobby_name": lobby_name,
             }
             await ws.send(json.dumps({
@@ -202,24 +217,19 @@ async def handle(ws):
         room = rooms.get(code) if code else None
         if room:
             room["peers"].discard(ws)
-            if not room["peers"] or ws == room.get("host_ws"):
+            if ws == room.get("host_ws"):
+                room["host_ws"] = None
+            if not room["peers"]:
                 if code in rooms:
                     del rooms[code]
                 log.info("room %s closed", code)
-                for peer in list(room["peers"]):
-                    try:
-                        await peer.send(json.dumps({"type": "disconnected", "error": "Host closed the room"}))
-                        await peer.close(code=1000, reason="Host left")
-                    except websockets.exceptions.ConnectionClosed:
-                        pass
             else:
                 count = len(room["peers"])
                 for peer in list(room["peers"]):
                     try:
                         await peer.send(json.dumps({"type": "peer_left", "player_count": count}))
-                    except websockets.exceptions.ConnectionClosed:
+                    except:
                         pass
-
 
 async def main():
     log.info(

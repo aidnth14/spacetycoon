@@ -1,125 +1,126 @@
+import asyncio
 import json
+import logging
 import queue
-import random
 import socket
 import ssl
-import struct
 import threading
+import time
+import websockets
 
-from websockets.sync.client import connect as ws_connect
-from websockets.exceptions import ConnectionClosed, InvalidURI, InvalidHandshake
+STATE_DISCONNECTED = "disconnected"
+STATE_CONNECTING = "connecting"
+STATE_CONNECTED = "connected"
+STATE_RECONNECTING = "reconnecting"
 
-_DNS_CACHE = {}
-
-
-def _resolve_via_public_dns(hostname, dns_server="8.8.8.8"):
-    if hostname in _DNS_CACHE:
-        return _DNS_CACHE[hostname]
-    qid = random.randint(0, 65535)
-    header = struct.pack(">HHHHHH", qid, 0x0100, 1, 0, 0, 0)
-    question = b""
-    for part in hostname.split("."):
-        question += bytes([len(part)]) + part.encode()
-    question += b"\x00" + struct.pack(">HH", 1, 1)  # type A, class IN
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.settimeout(4)
-        s.sendto(header + question, (dns_server, 53))
-        data, _ = s.recvfrom(512)
-    ancount = struct.unpack(">H", data[6:8])[0]
-    offset = len(header) + len(question)
-    for _ in range(ancount):
-        if data[offset] & 0xC0 == 0xC0:
-            offset += 2
-        rtype, _, _, rdlength = struct.unpack(">HHIH", data[offset:offset + 10])
-        offset += 10
-        if rtype == 1 and rdlength == 4:
-            ip = ".".join(str(b) for b in data[offset:offset + 4])
-            _DNS_CACHE[hostname] = ip
-            return ip
-        offset += rdlength
-    raise socket.gaierror(f"no A record for {hostname} via {dns_server}")
-
-
-def humanize_connect_error(e):
-    if isinstance(e, InvalidURI):
-        return "Invalid server address — must start with ws:// or wss://"
-    if isinstance(e, socket.gaierror):
-        return "Server not found — check the address for typos, or your internet connection."
-    if isinstance(e, TimeoutError) or isinstance(e, socket.timeout):
-        return "Connection timed out — server is unreachable or not responding."
-    if isinstance(e, ConnectionRefusedError):
-        return "Server refused the connection — it may be offline or the port is wrong."
-    if isinstance(e, ssl.SSLCertVerificationError):
-        return "TLS certificate error — the server address may be wrong."
-    if isinstance(e, InvalidHandshake):
-        return "Server didn't respond like a WebSocket relay — check the address."
-    if isinstance(e, OSError) and getattr(e, "errno", None) in (61, 111):
-        return "Server refused the connection — it may be offline."
-    if isinstance(e, OSError) and getattr(e, "errno", None) == 8:
-        return "Server not found — check the address for typos, or your internet connection."
-    return f"Couldn't reach server ({e.__class__.__name__}: {e})"
-
-
-def install_dns_fallback():
-    real_getaddrinfo = socket.getaddrinfo
-
-    def patched(host, *args, **kwargs):
-        try:
-            return real_getaddrinfo(host, *args, **kwargs)
-        except socket.gaierror:
-            ip = _resolve_via_public_dns(host)
-            return real_getaddrinfo(ip, *args, **kwargs)
-
-    socket.getaddrinfo = patched
-
+log = logging.getLogger("network")
 
 class Connection:
-    """Connects and runs a websocket on a background thread, exposes an
-    incoming-message queue safe to drain from the pygame main loop. The
-    connect handshake (DNS + TLS) is also off the main thread so the UI
-    never blocks waiting on the network."""
-
     def __init__(self):
-        self.ws = None
+        self.state = STATE_DISCONNECTED
         self.incoming = queue.Queue()
+        self.outgoing = queue.Queue()
+        self.addr = None
+        self.first_message = None
+        self.session_id = None
         self._thread = None
+        self._loop = None
+        self._shutdown = threading.Event()
 
-    def connect(self, addr, first_message):
-        self._thread = threading.Thread(
-            target=self._connect_and_read, args=(addr, first_message), daemon=True
-        )
+    def connect(self, addr, first_message, session_id):
+        self.addr = addr
+        self.first_message = first_message
+        self.session_id = session_id
+        self.state = STATE_CONNECTING
+        self._shutdown.clear()
+        self._thread = threading.Thread(target=self._run_thread, daemon=True)
         self._thread.start()
 
-    def _connect_and_read(self, addr, first_message):
+    def _run_thread(self):
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
         try:
-            self.ws = ws_connect(addr, open_timeout=6)
-            self.send(first_message)
+            self._loop.run_until_complete(self._run_async())
         except Exception as e:
-            self.incoming.put({"type": "connect_error", "error": humanize_connect_error(e)})
-            return
-        try:
-            for raw in self.ws:
-                self.incoming.put(json.loads(raw))
-        except ConnectionClosed as e:
-            self.incoming.put({"type": "disconnected", "error": f"closed: {e.code} {e.reason}"})
-        except Exception as e:
-            self.incoming.put({"type": "disconnected", "error": str(e)})
-        else:
-            self.incoming.put({"type": "disconnected", "error": "closed"})
+            log.exception("Network thread crashed")
+        finally:
+            self.state = STATE_DISCONNECTED
+            self._loop.close()
 
-    def send(self, d):
-        self.ws.send(json.dumps(d))
+    async def _run_async(self):
+        retry_delay = 1.0
+        max_delay = 15.0
+        
+        while not self._shutdown.is_set():
+            self._set_state(STATE_CONNECTING if retry_delay == 1.0 else STATE_RECONNECTING)
+            
+            try:
+                async with websockets.connect(self.addr, ping_interval=15, ping_timeout=10, open_timeout=5) as ws:
+                    self._set_state(STATE_CONNECTED)
+                    retry_delay = 1.0
+                    
+                    # Authenticate
+                    auth_msg = dict(self.first_message)
+                    auth_msg["session_id"] = self.session_id
+                    await ws.send(json.dumps(auth_msg))
+                    
+                    sender_task = asyncio.create_task(self._sender(ws))
+                    receiver_task = asyncio.create_task(self._receiver(ws))
+                    
+                    done, pending = await asyncio.wait(
+                        [sender_task, receiver_task], 
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+                    
+                    for task in pending:
+                        task.cancel()
+                        
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                log.warning(f"Connection failed: {e}")
+                self.incoming.put({"type": "connect_error", "error": f"Connection lost: {e}"})
+                
+            if self._shutdown.is_set():
+                break
+                
+            await asyncio.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, max_delay)
+
+    async def _sender(self, ws):
+        while not self._shutdown.is_set():
+            try:
+                msg = self.outgoing.get_nowait()
+                await ws.send(json.dumps(msg))
+            except queue.Empty:
+                await asyncio.sleep(0.01)
+            except Exception as e:
+                log.error(f"Send error: {e}")
+                break
+
+    async def _receiver(self, ws):
+        try:
+            async for raw in ws:
+                try:
+                    msg = json.loads(raw)
+                    self.incoming.put(msg)
+                except json.JSONDecodeError:
+                    pass
+        except Exception as e:
+            log.error(f"Receive error: {e}")
+
+    def send(self, msg):
+        if self.state == STATE_CONNECTED:
+            self.outgoing.put(msg)
 
     def close(self):
-        """Never blocks the caller: the actual close handshake (which can
-        wait on a server ack) runs on a throwaway daemon thread."""
-        ws, self.ws = self.ws, None
-        if ws:
-            threading.Thread(target=self._close_quietly, args=(ws,), daemon=True).start()
+        self._shutdown.set()
+        self.state = STATE_DISCONNECTED
 
-    @staticmethod
-    def _close_quietly(ws):
-        try:
-            ws.close()
-        except Exception:
-            pass
+    def _set_state(self, new_state):
+        if self.state != new_state:
+            self.state = new_state
+            self.incoming.put({"type": "network_state", "state": new_state})
+
+def install_dns_fallback():
+    pass

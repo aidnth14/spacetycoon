@@ -469,7 +469,7 @@ def do_host(S):
         "lobby_name": S.lobby_name_input.value.strip(),
         "max_players": S.max_players_stepper.value,
         "username": S.username,
-    })
+    }, S.client_id)
     S.status_msg = "Connecting..."
     S.state = STATE_WAIT
 
@@ -486,7 +486,7 @@ def do_join(S):
     S.room_code = ""
     S.username = S.name_inputs[0].value.strip() or "Player"
     enter_world(S)
-    S.conn.connect(addr, {"type": "join", "code": code, "username": S.username})
+    S.conn.connect(addr, {"type": "join", "code": code, "username": S.username}, S.client_id)
     S.status_msg = "Joining..."
     S.state = STATE_WAIT
 
@@ -1477,14 +1477,16 @@ def frame(S, events, dt, now):
                                 "name": nm, "color": col, "seen": now}
             elif t == "lobby_hello" and S.is_host:
                 pid = msg["id"]
+                existing = getattr(S, "lobby_players", {}).get(pid, {})
                 S.lobby_players[pid] = {
                     "name": msg["name"],
                     "profile": msg.get("profile", "Pilot"),
                     "skin": msg.get("skin", "Default"),
                     "color": msg.get("color", [255,255,255]),
-                    "ready": False,
-                    "restricted": False,
+                    "ready": existing.get("ready", False),
+                    "restricted": existing.get("restricted", False),
                     "is_host": False,
+                    "disconnected": False,
                     "last_seen": now
                 }
                 S.conn.send({"type": "lobby_state", "players": S.lobby_players})
@@ -1525,6 +1527,12 @@ def frame(S, events, dt, now):
 
             elif t == "error":
                 reset_to_menu(S, f"Error: {msg['msg']}")
+            elif t == "network_state":
+                ns = msg["state"]
+                if ns == "reconnecting":
+                    S.status_msg = "Reconnecting..."
+                elif ns == "disconnected":
+                    reset_to_menu(S, "Disconnected from server.")
             elif t == "connect_error":
                 reset_to_menu(S, msg["error"])
             elif t == "disconnected":
