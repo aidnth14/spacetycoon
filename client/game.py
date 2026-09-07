@@ -1111,39 +1111,28 @@ def apply_shaders(S, screen, CW, CH):
     light_layer = pygame.Surface((CW, CH))
     light_layer.fill((70, 70, 95))  # Ambient blue/grey darkness
     
-    # BLOOM: Downscaled layer for glowing objects
-    BW, BH = CW // 3, CH // 3
-    bloom_layer = pygame.Surface((BW, BH))
-    bloom_layer.fill((0, 0, 0))
-    
-    # Draw lights and bloom sources
-    def add_light(x, y, r, color, bloom_color=None):
+    # Draw lights
+    def add_light(x, y, r, color):
         draw_glow(light_layer, color, x, y, r)
-        if bloom_color:
-            draw_glow(bloom_layer, bloom_color, x // 3, y // 3, r // 3)
             
     # Add lights for all players
     for p in getattr(S, "local_players", []):
         sx, sy = S.iso.to_screen(*S.iso.world_px(p[0], p[1]))
         sy -= S.iso.elev(p[0], p[1])
-        add_light(int(sx), int(sy), 140, (180, 180, 180), (100, 100, 150))
+        add_light(int(sx), int(sy), 140, (180, 180, 180))
         
     if getattr(S, "me", None):
         sx, sy = S.iso.to_screen(*S.iso.world_px(S.me[0], S.me[1]))
         sy -= S.iso.elev(S.me[0], S.me[1])
-        add_light(int(sx), int(sy), 140, (180, 180, 180), (100, 100, 150))
+        add_light(int(sx), int(sy), 140, (180, 180, 180))
         
     for pid, p in getattr(S, "peers", {}).items():
         sx, sy = S.iso.to_screen(*S.iso.world_px(p["p"][0], p["p"][1]))
         sy -= S.iso.elev(p["p"][0], p["p"][1])
-        add_light(int(sx), int(sy), 120, (140, 140, 140), (80, 80, 120))
+        add_light(int(sx), int(sy), 120, (140, 140, 140))
         
     # Multiply lights onto screen
     screen.blit(light_layer, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
-    
-    # Add bloom onto screen
-    upscaled = pygame.transform.smoothscale(bloom_layer, (CW, CH))
-    screen.blit(upscaled, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
 
 
 def frame(S, events, dt, now):
