@@ -159,21 +159,40 @@ def check_for_reload(now):
         return False
 
 
+import traceback
+import datetime
+
 running = True
-while running:
-    dt = S.clock.tick(30) / 1000.0
-    now = time.time()
+try:
+    while running:
+        dt = S.clock.tick(30) / 1000.0
+        now = time.time()
+    
+        if now - _last_check > CHECK_INTERVAL:
+            _last_check = now
+            check_for_reload(now)
+    
+        events = remap_events(pygame.event.get())
+        running = game.frame(S, events, dt, now)
+        present()
+except Exception as e:
+    crash_report = traceback.format_exc()
+    print("\n" + "="*50)
+    print("FATAL CRASH DETECTED IN MAIN LOOP")
+    print("="*50)
+    print(crash_report)
+    print("="*50)
+    try:
+        with open("crash.log", "a") as logfile:
+            logfile.write(f"\n--- CRASH AT {datetime.datetime.now()} ---\n")
+            logfile.write(crash_report)
+        print("Crash report saved to client/crash.log")
+    except Exception:
+        pass
 
-    if now - _last_check > CHECK_INTERVAL:
-        _last_check = now
-        check_for_reload(now)
-
-    events = remap_events(pygame.event.get())
-    running = game.frame(S, events, dt, now)
-    present()
-
-S.conn.close()
-if getattr(S, "voice", None):
-    S.voice.close()
-pygame.quit()
-sys.exit()
+finally:
+    S.conn.close()
+    if getattr(S, "voice", None):
+        S.voice.close()
+    pygame.quit()
+    sys.exit(1 if not running else 0)
