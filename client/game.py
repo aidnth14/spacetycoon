@@ -127,7 +127,6 @@ def toggle_play_pause(S):
 
 def apply_volume(S):
     S.music_volume = S.volume_slider.value
-    S.sound_volume = S.sound_slider.value
     S.music_muted = S.music_toggle.value  # toggle reads "MUTE": True = muted
     pygame.mixer.music.set_volume(0.0 if S.music_muted else S.music_volume)
 
@@ -315,7 +314,6 @@ def init(S):
 
     S.music_track_index = -1
     S.music_volume = cfg.MUSIC_VOLUME
-    S.sound_volume = S.sound_slider.value
     S.music_muted = False
     S.music_paused = False
     play_next_track(S)
@@ -329,7 +327,7 @@ def rebuild(S):
         "addr": S.addr_input.value, "code": S.code_input.value,
         "names": [n.value for n in S.name_inputs],
         "lobby": S.lobby_name_input.value, "maxp": S.max_players_stepper.value,
-        "vol": S.volume_slider.value, "svol": S.sound_slider.value,
+        "vol": S.volume_slider.value, 
         "mute": S.music_toggle.value,
     }
     _build_fonts(S)
@@ -349,7 +347,6 @@ def rebuild(S):
     S.lobby_name_input.value = vals["lobby"]
     S.max_players_stepper.value = vals["maxp"]
     S.volume_slider.value = vals["vol"]
-    S.sound_slider.value = vals["svol"]
     S.music_toggle.value = vals["mute"]
 
 
@@ -875,7 +872,7 @@ def cursor_kind(S):
     if S.show_settings:
         if S.volume_slider.dragging or S.cam_smooth_slider.dragging:
             return "grab"
-        return "point" if hot([S.volume_slider.rect, S.sound_slider.rect,
+        return "point" if hot([S.volume_slider.rect,
                                 S.music_toggle.rect, S.prev_btn.rect, S.play_pause_btn.rect,
                                 S.next_btn.rect, S.settings_close_btn.rect,
                                 S.settings_x.rect]) else "arrow"
@@ -1431,7 +1428,7 @@ def frame(S, events, dt, now):
                             "profile": "Pilot",
                             "skin": "Default",
                             "color": list(color_for(S.username)),
-                            "ready": False,
+                            "ready": True,
                             "restricted": False,
                             "is_host": True,
                             "disconnected": False,
@@ -1902,8 +1899,6 @@ def frame(S, events, dt, now):
         # We manually aligned the sliders, let's just place the icons dynamically or near music/sound
         if S.music_icon is not None:
             screen.blit(S.music_icon, (SETTINGS_RECT.x + 8, S.volume_slider.rect.centery - 13))
-        if S.sound_icon is not None:
-            screen.blit(S.sound_icon, (SETTINGS_RECT.x + 8, S.sound_slider.rect.centery - 13))
         
         S.music_toggle.draw(screen, S.small_font)
         
