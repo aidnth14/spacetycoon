@@ -100,8 +100,8 @@ class Connection:
         try:
             for raw in self.ws:
                 self.incoming.put(json.loads(raw))
-        except ConnectionClosed:
-            pass
+        except ConnectionClosed as e:
+            self.incoming.put({"type": "disconnected", "error": f"closed: {e.code} {e.reason}"})
         except Exception as e:
             self.incoming.put({"type": "disconnected", "error": str(e)})
         else:

@@ -140,7 +140,7 @@ async def handle(ws):
             lobby_name = str(msg.get("lobby_name", "")).strip()[:MAX_LOBBY_NAME_LEN]
 
             rooms[code] = {
-                "peers": {ws}, "created": time.time(), "joined": False,
+                "peers": {ws}, "host_ws": ws, "created": time.time(), "joined": False,
                 "max_players": max_players, "lobby_name": lobby_name,
             }
             await ws.send(json.dumps({
@@ -202,9 +202,16 @@ async def handle(ws):
         room = rooms.get(code) if code else None
         if room:
             room["peers"].discard(ws)
-            if not room["peers"]:
-                del rooms[code]
+            if not room["peers"] or ws == room.get("host_ws"):
+                if code in rooms:
+                    del rooms[code]
                 log.info("room %s closed", code)
+                for peer in list(room["peers"]):
+                    try:
+                        await peer.send(json.dumps({"type": "disconnected", "error": "Host closed the room"}))
+                        await peer.close(code=1000, reason="Host left")
+                    except websockets.exceptions.ConnectionClosed:
+                        pass
             else:
                 count = len(room["peers"])
                 for peer in list(room["peers"]):

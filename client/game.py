@@ -30,6 +30,7 @@ PLAYER_R = 12
 LOCAL_MAX = 4  # same-screen coop supports up to 4 keyboard controllers
 POS_SEND_HZ = 6  # online position updates/sec (stays under the relay rate cap)
 CAM_SMOOTH = 6.0  # camera easing — lower = smoother/laggier follow
+REVEAL_RADIUS = 6  # cells visible around each player (circular fog of war)
 
 # jump / gravity — z is height in screen px; airborne avatars clear props
 GRAVITY = 1500.0
@@ -302,10 +303,14 @@ def init(S):
     S.voice = voicelib.Voice()
     S.show_keys = False           # keybinds panel
     load_game_icons(S)
+    load_cursors(S)
 
     S.focus_index = 0  # PLAY focused by default
     S.using_controller = False
     S.show_settings = False
+    S.spawn_cell = None      # original spawn, marked with a pixel-art X
+    S.pressed_tile = None    # tile clicked (drawn white)
+    S.pressed_until = 0.0    # timestamp the white tile expires (debug: 5s)
 
     S.music_track_index = -1
     S.music_volume = cfg.MUSIC_VOLUME
@@ -329,6 +334,7 @@ def rebuild(S):
     _build_fonts(S)
     _build_ui(S)
     load_game_icons(S)
+    load_cursors(S)
     S.starfield = Starfield(cfg.WIDTH, cfg.HEIGHT)
     # backdrop world + vignette persist across reloads; create if this session
     # predates them (first hot-reload after the feature was added)
@@ -481,6 +487,7 @@ def do_single(S):
     fx, fy = S.iso.find_free(0.0, 0.0)
     S.local_players = [[fx, fy, 0.0, 0.0]]
     S.local_names = [S.name_inputs[0].value.strip() or "P1"]
+    S.spawn_cell = (fx, fy)
     snap_camera(S, fx, fy)
     S.status_msg = ""
     S.state = STATE_LOCAL
@@ -497,6 +504,7 @@ def do_local(S):
         fx, fy = S.iso.find_free(math.cos(ang) * 3, math.sin(ang) * 3)
         S.local_players.append([fx, fy, 0.0, 0.0, 0.0, 0.0, 0.0])
         S.local_names.append(S.name_inputs[i].value.strip() or f"P{i+1}")
+    S.spawn_cell = tuple(centroid(S.local_players))
     snap_camera(S, *centroid(S.local_players))
     S.status_msg = ""
     S.state = STATE_LOCAL
@@ -587,6 +595,92 @@ def centroid(points):
     return sum(p[0] for p in points) / n, sum(p[1] for p in points) / n
 
 
+def visible_cells(S):
+    """Union of circular reveal areas around every on-screen player. Tiles
+    outside this set aren't rendered, so the world is discovered as players
+    move — locally and (via peer positions) in multiplayer too."""
+    if S.state == STATE_TEST:
+        pts = [S.me] + [pr["p"] for pr in S.peers.values()]
+    else:
+        pts = S.local_players
+    cells = set()
+    R, R2 = REVEAL_RADIUS, REVEAL_RADIUS * REVEAL_RADIUS
+    for p in pts:
+        cx, cy = round(p[0]), round(p[1])
+        for dx in range(-R, R + 1):
+            for dy in range(-R, R + 1):
+                if dx * dx + dy * dy <= R2:
+                    cells.add((cx + dx, cy + dy))
+    return cells
+
+
+def tile_at_screen(S, mx, my):
+    """Canvas mouse position -> the grid cell whose (elevated) top-face diamond
+    is under the cursor. Tests nearby cells and picks the front-most one so the
+    entire visible top face is clickable, not just a quadrant."""
+    iso = S.iso
+    HW, HH = iso.HALF_W, iso.HALF_H
+    base = iso.cell_at(mx + iso.cam_x, my + iso.cam_y)   # flat guess to bound the search
+    best = None
+    for dgy in range(-3, 4):
+        for dgx in range(-3, 4):
+            gx, gy = base[0] + dgx, base[1] + dgy
+            cx, cy = _tile_anchor(S, gx, gy)            # top-face centre
+            if abs(mx - cx) / HW + abs(my - cy) / HH <= 1.0:   # inside the diamond
+                key = (gx + gy, iso.world.get(gx, gy)[2])       # front-most, then taller
+                if best is None or key > best[0]:
+                    best = (key, (gx, gy))
+    return best[1] if best else base
+
+
+def _tile_anchor(S, fx, fy):
+    """Screen position of a grid cell's ground center, following elevation."""
+    sx, sy = S.iso.to_screen(*S.iso.world_px(fx, fy))
+    return int(sx), int(sy - S.iso.elev(fx, fy))
+
+
+def draw_spawn_marker(S):
+    """Draw the tilex1 marker tile on the original spawn cell, seated like a
+    normal world tile (position + elevation lift)."""
+    cell = getattr(S, "spawn_cell", None)
+    img = getattr(S, "spawn_img", None)
+    if not cell or not img:
+        return
+    iso = S.iso
+    gx, gy = round(cell[0]), round(cell[1])
+    _, _, level = iso.world.get(gx, gy)
+    HW, HH = iso.HALF_W, iso.HALF_H
+    sx = (gx - gy) * HW - iso.cam_x
+    sy = (gx + gy) * HH - iso.cam_y
+    oy = sy - level * iso.LIFT
+    if sx < -iso.TILE_PX or sx > cfg.WIDTH + iso.TILE_PX or oy < -iso.TILE_PX or oy > cfg.HEIGHT + iso.TILE_PX:
+        return
+    tile = pygame.transform.scale(img, (iso.TILE_PX, iso.TILE_PX))
+    S.screen.blit(tile, (int(sx - HW), int(oy - HH)))
+
+
+def draw_tile_press(S):
+    """While a tile is held (mouse down), recolor only its top face white — the
+    cube sides stay untouched (they're hidden when surrounded anyway)."""
+    cell = getattr(S, "pressed_tile", None)
+    if not cell or time.time() > getattr(S, "pressed_until", 0):
+        return
+    gx, gy = cell
+    iso = S.iso
+    base, prop, level = iso.world.get(gx, gy)
+    HW, HH, TPX = iso.HALF_W, iso.HALF_H, iso.TILE_PX
+    sx = (gx - gy) * HW - iso.cam_x
+    sy = (gx + gy) * HH - iso.cam_y
+    oy = sy - level * iso.LIFT
+    w = iso.tiles[base].copy()
+    w.fill((255, 255, 255, 0), special_flags=pygame.BLEND_RGB_MAX)      # opaque -> white
+    mask = pygame.Surface((TPX, TPX), pygame.SRCALPHA)                  # top-face diamond only
+    pygame.draw.polygon(mask, (255, 255, 255, 255),                     # centred at local 2*HH
+                        [(HW, HH), (2 * HW, 2 * HH), (HW, 3 * HH), (0, 2 * HH)])
+    w.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)          # keep white only on top face
+    S.screen.blit(w, (sx - HW, oy - HH))
+
+
 def draw_avatar(S, p, color, name, me=False):
     """A rover on the terrain at grid cell [fx, fy, z, vz]; z lifts it mid-jump."""
     screen = S.screen
@@ -638,6 +732,7 @@ def enter_world(S):
     """Drop this client's avatar onto the map (online modes)."""
     import random
     S.me = list(S.iso.find_free(0.0, 0.0)) + [0.0, 0.0, 0.0, 0.0, 0.0]   # fx, fy, z, vz, dash_time, dash_x, dash_y
+    S.spawn_cell = (S.me[0], S.me[1])
     S.peers = {}
     S.client_id = f"{S.username}#{random.randint(1000, 9999)}"
     snap_camera(S, S.me[0], S.me[1])
@@ -680,42 +775,17 @@ def draw_world_hud(S, lines, hint):
         draw_text(screen, hint, S.small_font, 0, cfg.HEIGHT - 90, cfg.GOLD_FAINT,
                   center_x=cfg.WIDTH // 2)
 
-    # --- Draw Hearts (Top Left, below HUD) ---
-    heart_path = os.path.join(S.ASSETS_DIR, "ui", "heart.png")
-    heart_img = None
-    if os.path.exists(heart_path):
-        try:
-            heart_img = pygame.transform.smoothscale(pygame.image.load(heart_path).convert_alpha(), (24, 24))
-        except: pass
-
+    # --- Draw Hearts (Top Left, below HUD) — pixel-art heart from the pack ---
+    heart_img = getattr(S, "heart_img", None)
+    HS = 28  # heart draw size (px)
     for i in range(5):
-        hx, hy = 16 + i * 28, h + 24
+        hx, hy = 16 + i * (HS + 4), h + 24
         if heart_img:
             screen.blit(heart_img, (hx, hy))
         else:
             pygame.draw.circle(screen, cfg.RED, (hx + 7, hy + 7), 7)
             pygame.draw.circle(screen, cfg.RED, (hx + 17, hy + 7), 7)
             pygame.draw.polygon(screen, cfg.RED, [(hx, hy + 10), (hx + 24, hy + 10), (hx + 12, hy + 22)])
-
-    # --- Draw Inventory (Bottom Center) ---
-    cell_path = os.path.join(S.ASSETS_DIR, "ui", "inv_cell.png")
-    cell_img = None
-    if os.path.exists(cell_path):
-        try:
-            cell_img = pygame.transform.smoothscale(pygame.image.load(cell_path).convert_alpha(), (48, 48))
-        except: pass
-
-    inv_w = 5 * 52
-    start_x = cfg.WIDTH // 2 - inv_w // 2
-    y_inv = cfg.HEIGHT - 65
-    for i in range(5):
-        cx = start_x + i * 52
-        if cell_img:
-            screen.blit(cell_img, (cx, y_inv))
-        else:
-            r = pygame.Rect(cx, y_inv, 48, 48)
-            pygame.draw.rect(screen, (20, 24, 30), r, border_radius=8)
-            pygame.draw.rect(screen, cfg.GOLD_DIM, r, 2, border_radius=8)
 
 
 
@@ -733,6 +803,21 @@ def load_game_icons(S):
             S.pad[k] = pygame.transform.scale(ic, (26, 26))
     except Exception as e:
         print(f"[icons] controller sheet: {e}")
+    # pixel-art heart (crisp nearest-neighbor scale, aspect preserved)
+    S.heart_img = None
+    try:
+        hi = pygame.image.load(os.path.join(S.ASSETS_DIR, "ui", "heart.png")).convert_alpha()
+        w, h = hi.get_size()
+        S.heart_img = pygame.transform.scale(hi, (28, max(1, round(28 * h / w))))
+    except Exception as e:
+        print(f"[icons] heart: {e}")
+    # spawn-point marker tile (a full cube tile drawn on the spawn cell)
+    S.spawn_img = None
+    try:
+        S.spawn_img = pygame.image.load(
+            os.path.join(S.ASSETS_DIR, "tiles", "tilex1.png")).convert_alpha()
+    except Exception as e:
+        print(f"[icons] tilex1: {e}")
     S.uicons = {}
     uidir = os.path.join(S.ASSETS_DIR, "ui")
     try:
@@ -744,8 +829,110 @@ def load_game_icons(S):
         print(f"[icons] ui glyphs: {e}")
 
 
-def draw_mic(screen, cx, cy, h, color, active=True):
-    """Vector microphone glyph, centered on (cx, cy)."""
+CURSOR_SCALE = 1.75  # 16px source -> 28px on the canvas
+CURSOR_HOTSPOTS = {   # in source (16px) coords, before scaling
+    "arrow": (1, 1), "point": (5, 1), "grab": (8, 8),
+    "open": (8, 8), "hand": (8, 8), "busy": (8, 8),
+}
+
+
+def load_cursors(S):
+    """Load the Kenney pixel cursors and hide the OS cursor so we can draw our
+    own on the canvas (scales correctly with the letterbox)."""
+    S.cursors = {}
+    cdir = os.path.join(S.ASSETS_DIR, "cursors")
+    try:
+        for name in ("arrow", "point", "open", "grab", "hand", "busy"):
+            img = pygame.image.load(os.path.join(cdir, name + ".png")).convert_alpha()
+            w, h = img.get_size()
+            S.cursors[name] = pygame.transform.scale(
+                img, (round(w * CURSOR_SCALE), round(h * CURSOR_SCALE)))
+    except Exception as e:
+        print(f"[cursors] {e}")
+    # full selectable pack — press F2 to cycle your pointer through all of them
+    S.cursor_pack = []
+    pdir = os.path.join(cdir, "pack")
+    try:
+        for fn in sorted(os.listdir(pdir)):
+            if fn.endswith(".png"):
+                img = pygame.image.load(os.path.join(pdir, fn)).convert_alpha()
+                w, h = img.get_size()
+                S.cursor_pack.append(pygame.transform.scale(
+                    img, (round(w * CURSOR_SCALE), round(h * CURSOR_SCALE))))
+    except Exception as e:
+        print(f"[cursors] pack: {e}")
+    if not hasattr(S, "cursor_index"):
+        S.cursor_index = 0   # 0 = contextual set; >0 picks pack[index-1] as pointer
+    pygame.mouse.set_visible(not S.cursors)  # keep OS cursor only if load failed
+
+
+def cursor_kind(S):
+    """Pick which cursor to show for the current context."""
+    if S.state in (STATE_WAKE, STATE_WAIT):
+        return "busy"
+    mp = pygame.mouse.get_pos()
+    hot = lambda rects: any(r.collidepoint(mp) for r in rects)
+    if S.show_settings:
+        if S.volume_slider.dragging or S.sound_slider.dragging:
+            return "grab"
+        return "point" if hot([S.volume_slider.rect, S.sound_slider.rect,
+                                S.music_toggle.rect, S.prev_btn.rect, S.play_pause_btn.rect,
+                                S.next_btn.rect, S.settings_close_btn.rect,
+                                S.settings_x.rect]) else "arrow"
+    if S.show_keys:
+        return "point"
+    if getattr(S, "paused", False) and S.state in (STATE_LOCAL, STATE_TEST):
+        return "point" if hot([S.pause_resume_btn.rect, S.pause_help_btn.rect,
+                               S.pause_settings_btn.rect, S.pause_quit_btn.rect]) else "arrow"
+    if hot([S.help_icon_btn.rect, S.close_btn.rect]):
+        return "point"
+    if S.state == STATE_MENU:
+        return "point" if hot([b.rect for b in S.MENU_FOCUS]) else "arrow"
+    if S.state == STATE_SETUP:
+        rects = [S.setup_confirm_btn.rect, S.panel_x.rect] + [i.rect for i in S.name_inputs]
+        if S.setup_mode in ("join", "host"):
+            rects.append(S.addr_input.rect)
+        if S.setup_mode == "join":
+            rects.append(S.code_input.rect)
+        if S.setup_mode in ("host", "local"):
+            rects += [S.lobby_name_input.rect, S.max_players_stepper.rect]
+        return "point" if hot(rects) else "arrow"
+    return "arrow"
+
+
+def draw_cursor(S, now):
+    if not getattr(S, "cursors", None):
+        return
+    kind = cursor_kind(S)
+    mx, my = pygame.mouse.get_pos()
+    # a chosen pack cursor overrides the plain pointer states (arrow/point)
+    idx = getattr(S, "cursor_index", 0)
+    if idx and kind in ("arrow", "point") and getattr(S, "cursor_pack", None):
+        img = S.cursor_pack[(idx - 1) % len(S.cursor_pack)]
+        hx, hy = CURSOR_HOTSPOTS.get(kind, (1, 1))
+        S.screen.blit(img, (int(mx - hx * CURSOR_SCALE), int(my - hy * CURSOR_SCALE)))
+        return
+    img = S.cursors.get(kind) or S.cursors.get("arrow")
+    if not img:
+        return
+    if kind == "busy":  # spin the loading ring, centered on the pointer
+        rot = pygame.transform.rotate(img, (-now * 300) % 360)
+        S.screen.blit(rot, (int(mx - rot.get_width() / 2), int(my - rot.get_height() / 2)))
+        return
+    hx, hy = CURSOR_HOTSPOTS.get(kind, (1, 1))
+    S.screen.blit(img, (int(mx - hx * CURSOR_SCALE), int(my - hy * CURSOR_SCALE)))
+
+
+def draw_mic(S, screen, cx, cy, h, color, active=True):
+    """Microphone glyph, centered on (cx, cy)."""
+    if active and S.uicons.get("mic"):
+        ic = S.uicons["mic"]
+        screen.blit(ic, (cx - ic.get_width() // 2, cy - ic.get_height() // 2))
+        return
+    if not active and S.uicons.get("mute_red"):
+        ic = S.uicons["mute_red"]
+        screen.blit(ic, (cx - ic.get_width() // 2, cy - ic.get_height() // 2))
+        return
     bw = max(6, int(h * 0.44))
     bh = int(h * 0.68)
     body = pygame.Rect(0, 0, bw, bh)
@@ -915,6 +1102,11 @@ def frame(S, events, dt, now):
         if event.type == pygame.KEYDOWN and event.key == pygame.K_F1:
             S.show_keys = not S.show_keys
             continue
+        # F2 cycles the pointer through the whole cursor pack (0 = default set)
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_F2:
+            n = len(getattr(S, "cursor_pack", [])) + 1
+            S.cursor_index = (getattr(S, "cursor_index", 0) + 1) % n
+            continue
         if S.show_keys:
             if event.type == pygame.MOUSEBUTTONDOWN or (
                     event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
@@ -929,7 +1121,7 @@ def frame(S, events, dt, now):
 
         # per-panel close (X) at the card corner backs out one level
         if (event.type == pygame.MOUSEBUTTONDOWN and not S.show_settings
-                and S.state != STATE_MENU and S.panel_x.clicked(event.pos)):
+                and S.state in (STATE_SETUP, STATE_WAIT) and S.panel_x.clicked(event.pos)):
             go_back(S)
             continue
 
@@ -1170,6 +1362,16 @@ def frame(S, events, dt, now):
                 and not S.show_settings:
             zoom(S, 1 if event.y > 0 else -1)
 
+        # --- click any tile: hold to turn that tile white, release to restore ---
+        if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
+                and S.state in (STATE_LOCAL, STATE_TEST)
+                and not S.show_settings and not S.show_keys
+                and not getattr(S, "paused", False)
+                and not S.help_icon_btn.rect.collidepoint(event.pos)
+                and not S.close_btn.rect.collidepoint(event.pos)):
+            S.pressed_tile = tile_at_screen(S, *event.pos)
+            S.pressed_until = now + 5.0   # debug: keep it white for 5 seconds
+
         if (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE
                 and S.state in (STATE_SETUP, STATE_WAIT)):
             go_back(S)
@@ -1247,8 +1449,9 @@ def frame(S, events, dt, now):
             elif t == "connect_error":
                 reset_to_menu(S, msg["error"])
             elif t == "disconnected":
-                err = msg.get("error", "closed")
-                reset_to_menu(S, f"Disconnected from server ({err}).")
+                if S.state != STATE_MENU:
+                    err = msg.get("error", "closed")
+                    reset_to_menu(S, f"Disconnected from server ({err}).")
     except queue.Empty:
         pass
 
@@ -1349,7 +1552,7 @@ def frame(S, events, dt, now):
         screen.blit(text_surf, (cx - text_surf.get_width() // 2, cy + 60))
 
     elif S.state == STATE_MENU:
-        draw_header(S, "")
+        # no header/footer on the lobby — just the sand text menu over the world
         # hovering a menu item selects it (keeps mouse + keyboard in sync)
         mouse = pygame.mouse.get_pos()
         for i, btn in enumerate(S.MENU_FOCUS):
@@ -1439,16 +1642,16 @@ def frame(S, events, dt, now):
 
     elif S.state == STATE_TEST:
         # shared endless world: every player walking the same map
-        S.iso.draw(screen)
+        S.iso.draw(screen, visible_cells(S))
+        draw_tile_press(S)
         crowd = [(pr["p"], pr["color"], pr["name"], False) for pr in S.peers.values()]
         crowd.append((S.me, color_for(S.username), S.username or "You", True))
         for p, col, nm, me in sorted(crowd, key=lambda a: a[0][0] + a[0][1]):  # iso depth
             draw_avatar(S, p, col, nm, me=me)
-        # mic sign floating over your head while push-to-talk is held
-        if S.voice.talking:
-            mx, my = S.iso.to_screen(*S.iso.world_px(S.me[0], S.me[1]))
-            my -= S.iso.elev(S.me[0], S.me[1]) + 42 + S.me[2]
-            draw_mic(screen, int(mx), int(my), 22, (120, 255, 150))
+        # mic sign floating over your head
+        mx, my = S.iso.to_screen(*S.iso.world_px(S.me[0], S.me[1]))
+        my -= S.iso.elev(S.me[0], S.me[1]) + 42 + S.me[2]
+        draw_mic(S, screen, int(mx), int(my), 22, (120, 255, 150), active=S.voice.talking)
         # peers who are talking are hard to know per-id; show a room mic flag
         rtt_text = f"{S.last_rtt:.0f} ms" if S.last_rtt is not None else "…"
         talk = "   MIC ON" if S.voice.talking else ""
@@ -1456,14 +1659,15 @@ def frame(S, events, dt, now):
             f"ROOM {S.room_code}   {1 + len(S.peers)}/{S.max_players} in view   [{S.iso.theme}]",
             f"RTT {rtt_text}    X {S.me[0]:+.1f}  Y {S.me[1]:+.1f}   {S.iso.scale}x{talk}",
             f"players here: {', '.join([S.username or 'You'] + [p['name'] for p in S.peers.values()])[:60]}",
-        ], "WASD walk · Space jump · +/- zoom · T chat · hold V talk · Tab tilemap · F1 keys · Esc")
+        ], "")
         if S.voice.talking:
             draw_mic(screen, cfg.WIDTH - 30, 30, 20, (120, 255, 150))
         draw_chat(S, now)
 
     elif S.state == STATE_LOCAL:
         # same endless world, same screen, up to 4 rovers
-        S.iso.draw(screen)
+        S.iso.draw(screen, visible_cells(S))
+        draw_tile_press(S)
         order = sorted(range(len(S.local_players)),
                        key=lambda i: S.local_players[i][0] + S.local_players[i][1])
         for i in order:
@@ -1476,14 +1680,15 @@ def frame(S, events, dt, now):
         chat_hint = " · T chat" if len(S.local_players) == 1 else ""
         draw_world_hud(S, [f"{title}   [{S.iso.theme}]   {S.iso.scale}x",
                            f"{len(S.local_players)} rovers   X {cx:+.1f}  Y {cy:+.1f}", schemes],
-                       f"move+jump per scheme · +/- zoom · Tab tilemap · R regen{chat_hint} · Esc menu")
+                       "")
         draw_chat(S, now)
 
-    if S.state not in (STATE_TEST, STATE_LOCAL):
+    if S.state not in (STATE_TEST, STATE_LOCAL, STATE_MENU):
         draw_footer(S)
-    
+
     S.help_icon_btn.draw(screen)
-    if S.state != STATE_MENU and not S.show_settings and not getattr(S, "paused", False):
+    # the close-X only belongs on the setup/wait panels, not floating in-world
+    if S.state in (STATE_SETUP, STATE_WAIT) and not S.show_settings:
         S.panel_x.draw(screen)
 
     if getattr(S, "paused", False) and S.state in (STATE_LOCAL, STATE_TEST) \
@@ -1532,5 +1737,7 @@ def frame(S, events, dt, now):
 
     if getattr(S, "reload_flash", 0) > now:
         draw_text(screen, "↻ hot-reloaded", S.small_font, 16, cfg.HEIGHT - 32, cfg.GREEN)
+
+    draw_cursor(S, now)  # custom pixel cursor, always on top
 
     return running

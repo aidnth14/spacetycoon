@@ -113,6 +113,37 @@ def make_vignette(w, h, depth=165):
     return pygame.transform.smoothscale(small, (w, h))
 
 
+class NineSlice:
+    """Stretch a bordered sprite to any rect without distorting its corners —
+    used to skin buttons and panels with the chopped pixel-art assets."""
+    def __init__(self, path, margin):
+        self.img = pygame.image.load(path).convert_alpha()
+        self.m = margin
+
+    def draw(self, surf, rect):
+        img, m = self.img, self.m
+        iw, ih = img.get_size()
+        x, y, w, h = rect.x, rect.y, max(rect.w, 2 * m + 2), max(rect.h, 2 * m + 2)
+        sub = lambda sx, sy, sw, sh: img.subsurface(pygame.Rect(sx, sy, sw, sh))
+        sc = pygame.transform.scale
+        b = surf.blit
+        rmw, rmh = iw - 2 * m, ih - 2 * m       # source middle spans
+        cw, ch = w - 2 * m, h - 2 * m           # dest middle spans
+        b(sub(0, 0, m, m), (x, y))
+        b(sub(iw - m, 0, m, m), (x + w - m, y))
+        b(sub(0, ih - m, m, m), (x, y + h - m))
+        b(sub(iw - m, ih - m, m, m), (x + w - m, y + h - m))
+        b(sc(sub(m, 0, rmw, m), (cw, m)), (x + m, y))
+        b(sc(sub(m, ih - m, rmw, m), (cw, m)), (x + m, y + h - m))
+        b(sc(sub(0, m, m, rmh), (m, ch)), (x, y + m))
+        b(sc(sub(iw - m, m, m, rmh), (m, ch)), (x + w - m, y + m))
+        b(sc(sub(m, m, rmw, rmh), (cw, ch)), (x + m, y + m))
+
+
+BUTTON_SKIN = None   # set by game after assets load (NineSlice) — else vector fallback
+PANEL_SKIN = None
+
+
 def draw_glow_text(surf, text, font, x, y, color, glow_color=None, glow_radius=2, center_x=None):
     glow_color = glow_color or color
     rendered = font.render(text, True, color)
@@ -166,8 +197,12 @@ def draw_wrapped_text(surf, text, font, y, max_width, color=cfg.WHITE, center_x=
 def draw_card(surf, rect, radius=cfg.CARD_RADIUS):
     shadow_rect = rect.move(0, 6)
     shadow = pygame.Surface(shadow_rect.size, pygame.SRCALPHA)
-    pygame.draw.rect(shadow, (0, 0, 0, 90), shadow.get_rect(), border_radius=radius)
+    pygame.draw.rect(shadow, (0, 0, 0, 110), shadow.get_rect(), border_radius=radius)
     surf.blit(shadow, shadow_rect.topleft)
+
+    if PANEL_SKIN is not None:                 # parchment-panel skin from the pack
+        PANEL_SKIN.draw(surf, rect)
+        return
 
     pygame.draw.rect(surf, cfg.CARD_BG, rect, border_radius=radius)
     pygame.draw.rect(surf, cfg.CARD_BORDER, rect, 2, border_radius=radius)

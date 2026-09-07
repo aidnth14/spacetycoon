@@ -200,17 +200,22 @@ class Iso:
                         return float(cx + dx), float(cy + dy)
         return fx, fy
 
-    def draw(self, screen):
+    def draw(self, screen, reveal=None):
+        """Render the world. When `reveal` is a set of (gx, gy) cells, only
+        those tiles are drawn (fog of war) and the rest stays black — the map
+        is discovered as players move. `reveal=None` draws everything (menu)."""
         cam_x, cam_y = self.cam_x, self.cam_y
         HW, HH, LIFT, TPX = self.HALF_W, self.HALF_H, self.LIFT, self.TILE_PX
         SW, SH = self.SW, self.SH
-        screen.fill(self.bg)
+        screen.fill((0, 0, 0) if reveal is not None else self.bg)
         cgx, cgy = self.cell_at(cam_x + SW // 2, cam_y + SH // 2)
         R = int(max(SW / HW, SH / HH)) + 8
         visible = []
         for dgy in range(-R, R + 1):
             for dgx in range(-R, R + 1):
                 gx, gy = cgx + dgx, cgy + dgy
+                if reveal is not None and (gx, gy) not in reveal:
+                    continue
                 sx = (gx - gy) * HW - cam_x
                 sy = (gx + gy) * HH - cam_y
                 if sx < -TPX or sx > SW or sy < -TPX * 2 or sy > SH + TPX:
