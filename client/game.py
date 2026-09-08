@@ -8,8 +8,11 @@ import math
 import os
 import queue
 import time
+import random
+import math
 
 import pygame
+from weapons import Weapon, WEAPONS, GLOBAL_HOTBAR
 
 import config as cfg
 import ui
@@ -317,12 +320,18 @@ def init(S):
     S.music_muted = False
     S.music_paused = False
     play_next_track(S)
+    for w in WEAPONS.values():
+        if w.image is None:
+            w.load(S.ASSETS_DIR)
 
 
 def rebuild(S):
     """Called after a hot reload. Rebuilds fonts/widgets/visuals from the new
     code, but preserves the live session: connection, music, game state, and
     the values the user has typed/adjusted."""
+    for w in WEAPONS.values():
+        if w.image is None:
+            w.load(S.ASSETS_DIR)
     vals = {
         "addr": S.addr_input.value, "code": S.code_input.value,
         "names": [n.value for n in S.name_inputs],
@@ -526,6 +535,7 @@ def iso_move(S, p, up, down, left, right, dash, dt):
         p[6] = (dgy / L) * 45.0
         S.shake = 0.5            # juicy screen shake
         
+    if isinstance(p[4], str): p[4] = 0.0
     if p[4] > 0: p[4] -= dt
     
     # friction on dash velocity
@@ -678,7 +688,7 @@ def draw_tile_press(S):
     S.screen.blit(w, (sx - HW, oy - HH))
 
 
-def draw_avatar(S, p, color, name, me=False):
+def draw_avatar(S, p, color, name, me=False, aim_angle=0.0, weapon_name="AK47", pressing=False):
     """A rover on the terrain at grid cell [fx, fy, z, vz]; z lifts it mid-jump."""
     screen = S.screen
     fx, fy, z = p[0], p[1], p[2]
@@ -700,6 +710,41 @@ def draw_avatar(S, p, color, name, me=False):
     pygame.draw.circle(screen, (255, 255, 255), (ix - PR // 4, iy - PR // 4), max(2, PR // 4))
     if name:
         draw_text(screen, name, S.small_font, 0, iy - PR - 18, color, center_x=ix)
+
+    wep = WEAPONS.get(weapon_name)
+    if wep and wep.image:
+        gun_img = wep.image
+        gw, gh = int(gun_img.get_width() * S.iso.scale * 1.0725), int(gun_img.get_height() * S.iso.scale * 1.0725)
+        gun_img = pygame.transform.scale(gun_img, (gw, gh))
+        
+        anim_offset_x = 0
+        anim_offset_y = 0
+        anim_angle_offset = 0
+        
+        if pressing:
+            import time
+            t = time.time() * 15  # Speed of animation
+            swing = math.sin(t)
+            is_tool = weapon_name in ["Sword", "Axe", "Pickaxe", "Shovel", "Fishing_rod", "Hammer", "Scythe", "Mallet"]
+            
+            if is_tool:
+                anim_angle_offset = swing * 0.8
+                anim_offset_x = math.cos(aim_angle) * swing * 8
+                anim_offset_y = math.sin(aim_angle) * swing * 8
+            else:
+                kick = max(0, math.sin(t * 2)) * getattr(wep, "recoil", 1.0) * 4
+                anim_offset_x = -math.cos(aim_angle) * kick
+                anim_offset_y = -math.sin(aim_angle) * kick
+                
+        flip_y = math.cos(aim_angle) < 0
+        if flip_y:
+            gun_img = pygame.transform.flip(gun_img, False, True)
+            
+        rot_angle = math.degrees(-(aim_angle + anim_angle_offset))
+        rot_img = pygame.transform.rotate(gun_img, rot_angle)
+        gr = rot_img.get_rect(center=(ix + anim_offset_x, iy + anim_offset_y))
+        screen.blit(rot_img, gr.topleft)
+
 
 
 def follow_camera(S, fx, fy, dt):
@@ -1335,6 +1380,23 @@ def frame(S, events, dt, now):
         if S.chat_open and event.type == pygame.KEYDOWN:
             if event.key == pygame.K_RETURN:
                 send_chat(S, S.chat_input); S.chat_input = ""; S.chat_open = False
+            
+            elif event.key == pygame.K_e:
+                my_weapon = getattr(S, "my_weapon", "AK47")
+                if my_weapon in GLOBAL_HOTBAR:
+                    idx = (GLOBAL_HOTBAR.index(my_weapon) + 1) % len(GLOBAL_HOTBAR)
+                    S.my_weapon = GLOBAL_HOTBAR[idx]
+            elif event.key == pygame.K_1: S.my_weapon = "AK47"
+            elif event.key == pygame.K_2: S.my_weapon = "Luger"
+            elif event.key == pygame.K_3: S.my_weapon = "M15"
+            elif event.key == pygame.K_4: S.my_weapon = "M24"
+            elif event.key == pygame.K_5: S.my_weapon = "M92"
+            elif event.key == pygame.K_6: S.my_weapon = "MP5"
+            elif event.key == pygame.K_7: S.my_weapon = "Revolver"
+            elif event.key == pygame.K_8: S.my_weapon = "SawedOffShotgun"
+            elif event.key == pygame.K_9: S.my_weapon = "Gun"
+            elif event.key == pygame.K_0: S.my_weapon = "Sword"
+
             elif event.key == pygame.K_ESCAPE:
                 S.chat_open = False; S.chat_input = ""
             elif event.key == pygame.K_BACKSPACE:
@@ -1373,7 +1435,14 @@ def frame(S, events, dt, now):
                         try_jump(S.local_players[i])
         if event.type == pygame.MOUSEWHEEL and S.state in (STATE_LOCAL, STATE_TEST) \
                 and not S.show_settings:
-            zoom(S, 1 if event.y > 0 else -1)
+            if pygame.key.get_mods() & pygame.KMOD_SHIFT:
+                my_weapon = getattr(S, "my_weapon", "AK47")
+                if my_weapon in GLOBAL_HOTBAR:
+                    idx = GLOBAL_HOTBAR.index(my_weapon)
+                    idx = (idx - 1) if event.y > 0 else (idx + 1)
+                    S.my_weapon = GLOBAL_HOTBAR[idx % len(GLOBAL_HOTBAR)]
+            else:
+                zoom(S, 1 if event.y > 0 else -1)
 
         # --- click any tile: hold to turn that tile white, release to restore ---
         if (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
@@ -1384,6 +1453,69 @@ def frame(S, events, dt, now):
                 and not S.close_btn.rect.collidepoint(event.pos)):
             S.pressed_tile = tile_at_screen(S, *event.pos)
             S.pressed_until = now + 5.0   # debug: keep it white for 5 seconds
+            
+            # Mining and chopping logic
+            if S.pressed_tile:
+                cx, cy = S.pressed_tile
+                target_p = S.me if S.state == STATE_TEST else S.local_players[0]
+                dist = math.hypot(target_p[0] - cx, target_p[1] - cy)
+                
+                if dist < 5.0:  # Must be close to mine
+                    try:
+                        cell = S.iso.world.get(cx, cy)
+                        my_weapon = getattr(S, 'my_weapon', 'AK47')
+                        
+                        is_prop = cell[1] in list(range(48, 61)) + [62, 64, 65, 67, 68]
+                        is_rock_ground = cell[0] in [100, 101]
+                        
+                        if is_prop or is_rock_ground:
+                            valid_hit = False
+                            if is_prop and my_weapon == "Axe": valid_hit = True
+                            elif is_rock_ground and my_weapon == "Pickaxe": valid_hit = True
+                            
+                            if valid_hit:
+                                if not hasattr(S, "prop_health"): S.prop_health = {}
+                                health = S.prop_health.get((cx, cy), random.randint(5, 7)) - 1
+                                S.prop_health[(cx, cy)] = health
+                                
+                                # Spawn particles
+                                if not hasattr(S, "particles"): S.particles = []
+                                sx, sy = S.iso.to_screen(*S.iso.world_px(cx, cy))
+                                sy -= S.iso.elev(cx, cy)
+                                color = (120, 120, 120) if is_rock_ground else (139, 69, 19)
+                                for _ in range(6):
+                                    S.particles.append({
+                                        "x": sx + random.uniform(-15, 15),
+                                        "y": sy - random.uniform(10, 40),
+                                        "vx": random.uniform(-40, 40),
+                                        "vy": random.uniform(-80, -20),
+                                        "life": 0.6,
+                                        "color": color
+                                    })
+                                
+                                if health <= 0:
+                                    if is_prop:
+                                        S.iso.world.cache[(cx, cy)] = (cell[0], None, cell[2])
+                                        if not hasattr(S, "dropped_items"): S.dropped_items = []
+                                        if cell[1] in range(48, 61):
+                                            for _ in range(random.randint(1, 3)):
+                                                S.dropped_items.append({
+                                                    "cx": cx, "cy": cy, "type": "log",
+                                                    "z": 15.0, "vz": random.uniform(150, 250),
+                                                    "vx": random.uniform(-1.5, 1.5), "vy": random.uniform(-1.5, 1.5)
+                                                })
+                                    elif is_rock_ground:
+                                        S.iso.world.cache[(cx, cy)] = (0, cell[1], cell[2])
+                                        if not hasattr(S, "dropped_items"): S.dropped_items = []
+                                        for _ in range(random.randint(1, 3)):
+                                            S.dropped_items.append({
+                                                "cx": cx, "cy": cy, 
+                                                "type": "copper",
+                                                "z": 15.0, "vz": random.uniform(150, 250),
+                                                "vx": random.uniform(-1.5, 1.5), "vy": random.uniform(-1.5, 1.5)
+                                            })
+                    except Exception as e:
+                        print(f"Mining error: {e}")
 
         if (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE
                 and S.state in (STATE_SETUP, STATE_WAIT)):
@@ -1493,7 +1625,9 @@ def frame(S, events, dt, now):
                                 continue  # Ignore this illegal update
 
                 S.peers[pid] = {"p": [msg["x"], msg["y"], msg.get("z", 0.0)],
-                                "name": nm, "color": col, "seen": now}
+                                "name": nm, "color": col, "seen": now,
+                                "wep": msg.get("wep", "AK47"),
+                                "aim": msg.get("aim", 0.0)}
             elif t == "lobby_hello" and S.is_host:
                 pid = msg["id"]
                 existing = getattr(S, "lobby_players", {}).get(pid, {})
@@ -1613,7 +1747,9 @@ def frame(S, events, dt, now):
                 S.conn.send({"type": "pos", "id": S.client_id, "name": S.username,
                              "color": list(color_for(S.username)),
                              "x": round(S.me[0], 2), "y": round(S.me[1], 2),
-                             "z": round(S.me[2], 1)})
+                             "z": round(S.me[2], 1),
+                             "wep": getattr(S, "my_weapon", "AK47"),
+                             "aim": round(getattr(S, "aim_angle", 0.0), 3)})
                 S.last_pos_sent = now
             except Exception:
                 reset_to_menu(S, "Send failed — connection lost.")
@@ -1640,8 +1776,132 @@ def frame(S, events, dt, now):
             apply_jump(p, dt)
         follow_camera(S, *centroid(S.local_players), dt)
 
+        # Always update aim angle
+        target_p = S.me if S.state == STATE_TEST else S.local_players[0]
+        pw_x, pw_y = S.iso.world_px(target_p[0], target_p[1])
+        mx, my = pygame.mouse.get_pos()
+        sx, sy = S.iso.to_screen(pw_x, pw_y)
+        sy -= S.iso.elev(target_p[0], target_p[1]) + 12 + target_p[2]
+        S.aim_angle = math.atan2(my - sy, mx - sx)
+        
+        # Fire logic
+        if pygame.mouse.get_pressed()[0] and not getattr(S, "chat_open", False) and not getattr(S, "show_settings", False) and not getattr(S, "notepad_open", False):
+            my_weapon = getattr(S, "my_weapon", "AK47")
+            wep = WEAPONS.get(my_weapon)
+            if wep and not getattr(S, "pressing", False):
+                S.pressing = True
+                aim = S.aim_angle
+                is_tool = my_weapon in ["Sword", "Axe", "Pickaxe", "Shovel", "Fishing_rod", "Hammer", "Scythe", "Mallet"]
+                if hasattr(wep, "bullet_speed") and wep.bullet_speed > 0 and not is_tool:
+                    hw = S.iso.HALF_W
+                    hh = S.iso.HALF_H
+                    
+                    # Calculate EXACT visual gun height
+                    pr = max(6, int(12 * S.iso.scale / 2))
+                    gun_z = S.iso.elev(target_p[0], target_p[1]) + target_p[2] + pr
+                    
+                    # Spawn node offset (exact end of gun barrel)
+                    barrel_px = 16 * S.iso.scale * 1.07
+                    sox = math.cos(aim) * barrel_px
+                    soy = math.sin(aim) * barrel_px
+                    owx = ((sox / hw) + (soy / hh)) / 2.0
+                    owy = ((soy / hh) - (sox / hw)) / 2.0
+                    
+                    bx = target_p[0] + owx
+                    by = target_p[1] + owy
+                    
+                    S.shake = getattr(wep, "recoil", 0) * 0.6
+                    
+                    # Knockback
+                    kb_px = getattr(wep, "recoil", 0) * 2.0
+                    kox = math.cos(aim) * kb_px
+                    koy = math.sin(aim) * kb_px
+                    target_p[0] -= ((kox / hw) + (koy / hh)) / 2.0
+                    target_p[1] -= ((koy / hh) - (kox / hw)) / 2.0
+                    
+                    if not hasattr(S, "bullets"): S.bullets = []
+                    
+                    def fire_proj(spd, spr):
+                        svx = math.cos(aim + spr) * spd
+                        svy = math.sin(aim + spr) * spd
+                        vwx = ((svx / hw) + (svy / hh)) / 2.0
+                        vwy = ((svy / hh) - (svx / hw)) / 2.0
+                        # Also store screen angle so the bullet image renders rotated correctly
+                        return vwx, vwy, aim + spr
+                    
+                    if my_weapon == "SawedOffShotgun":
+                        import random
+                        for spread in [-0.2, -0.1, 0, 0.1, 0.2]:
+                            spd = wep.bullet_speed * random.uniform(0.7, 1.1)
+                            vwx, vwy, sa = fire_proj(spd, spread)
+                            S.bullets.append({"wx": bx, "wy": by, "z": gun_z, "vx": vwx, "vy": vwy, "sa": sa, "life": 0.8, "img": wep.bullet_image})
+                    else:
+                        vwx, vwy, sa = fire_proj(wep.bullet_speed, 0)
+                        S.bullets.append({"wx": bx, "wy": by, "z": gun_z, "vx": vwx, "vy": vwy, "sa": sa, "life": 2.0, "img": wep.bullet_image})
+                    
+
+        elif not pygame.mouse.get_pressed()[0]:
+            S.pressing = False
+            
+        # Update bullets
+        if hasattr(S, "bullets"):
+            alive = []
+            for b in S.bullets:
+                b["wx"] += (b["vx"] / 2.0) * dt
+                b["wy"] += (b["vy"] / 2.0) * dt
+                b["life"] -= dt
+                if b["life"] > 0:
+                    cx, cy = S.iso.cell_at(b["wx"], b["wy"])
+                    if not S.iso.solid(cx, cy):
+                        alive.append(b)
+            S.bullets = alive
+
+
     # --- draw ---
     screen = S.screen
+    # Draw Notepad UI
+    if not hasattr(S, "notepad_icon"):
+        import os
+        try:
+            raw_icon = pygame.image.load(os.path.join(S.ASSETS_DIR, "ui/notebook.png")).convert_alpha()
+            S.notepad_icon = pygame.transform.scale(raw_icon, (128, 128))
+        except:
+            S.notepad_icon = pygame.Surface((128, 128))
+            
+    if not hasattr(S, "compass_base"):
+        import os
+        try:
+            cb = pygame.image.load(os.path.join(S.ASSETS_DIR, "ui/compass/base.png")).convert_alpha()
+            cn = pygame.image.load(os.path.join(S.ASSETS_DIR, "ui/compass/needle.png")).convert_alpha()
+            cc = pygame.image.load(os.path.join(S.ASSETS_DIR, "ui/compass/cover.png")).convert_alpha()
+            cw, ch = int(cb.get_width() * 1.5), int(cb.get_height() * 1.5)
+            S.compass_base = pygame.transform.scale(cb, (cw, ch))
+            S.compass_needle = pygame.transform.scale(cn, (cw, ch))
+            S.compass_cover = pygame.transform.scale(cc, (cw, ch))
+        except:
+            S.compass_base = pygame.Surface((96, 96), pygame.SRCALPHA)
+            S.compass_needle = pygame.Surface((96, 96), pygame.SRCALPHA)
+            S.compass_cover = pygame.Surface((96, 96), pygame.SRCALPHA)
+
+    if S.state in (STATE_TEST, STATE_LOCAL):
+        # Draw icons
+        screen.blit(S.notepad_icon, (-10, cfg.HEIGHT - 118))
+        
+        # Draw compass
+        cw, ch = S.compass_base.get_size()
+        compass_x, compass_y = cfg.WIDTH - 20 - cw, cfg.HEIGHT - 20 - ch
+        screen.blit(S.compass_base, (compass_x, compass_y))
+        
+        # Rotate needle to point towards origin (0, 0)
+        target_wx, target_wy = S.iso.world_px(0, 0)
+        target_p = S.me if S.state == STATE_TEST else S.local_players[0]
+        player_wx, player_wy = S.iso.world_px(target_p[0], target_p[1])
+        angle = math.degrees(math.atan2(player_wy - target_wy, target_wx - player_wx)) - 90
+        rotated_needle = pygame.transform.rotate(S.compass_needle, angle)
+        nr = rotated_needle.get_rect(center=(compass_x + cw // 2, compass_y + ch // 2))
+        screen.blit(rotated_needle, nr.topleft)
+        screen.blit(S.compass_cover, (compass_x, compass_y))
+
     if S.state in (STATE_TEST, STATE_LOCAL):
         screen.fill(cfg.BG)  # the world is drawn by each play-state branch below
     else:
@@ -1837,10 +2097,11 @@ def frame(S, events, dt, now):
         # shared endless world: every player walking the same map
         S.iso.draw(screen, visible_cells(S))
         draw_tile_press(S)
-        crowd = [(pr["p"], pr["color"], pr["name"], False) for pr in S.peers.values()]
-        crowd.append((S.me, color_for(S.username), S.username or "You", True))
-        for p, col, nm, me in sorted(crowd, key=lambda a: a[0][0] + a[0][1]):  # iso depth
-            draw_avatar(S, p, col, nm, me=me)
+        crowd = [(pr["p"], pr["color"], pr["name"], False, pr.get("wep", "AK47"), pr.get("aim", 0.0), pr.get("pressing", False)) for pr in S.peers.values()]
+        crowd.append((S.me, color_for(S.username), S.username or "You", True, getattr(S, 'my_weapon', 'AK47'), getattr(S, 'aim_angle', 0.0), getattr(S, 'pressing', False)))
+        for p, col, nm, me, wep, aim, pressing in sorted(crowd, key=lambda a: a[0][0] + a[0][1]):  # iso depth
+            draw_avatar(S, p, col, nm, me=me, aim_angle=aim, weapon_name=wep, pressing=pressing)
+
         # mic sign floating over your head
         mx, my = S.iso.to_screen(*S.iso.world_px(S.me[0], S.me[1]))
         my -= S.iso.elev(S.me[0], S.me[1]) + 42 + S.me[2]
@@ -1866,7 +2127,7 @@ def frame(S, events, dt, now):
         for i in order:
             p = S.local_players[i]
             name = S.local_names[i] if i < len(S.local_names) else f"P{i+1}"
-            draw_avatar(S, p, SCHEMES[i][5], name, me=(i == 0))
+            draw_avatar(S, p, SCHEMES[i][5], name, me=(i == 0), aim_angle=getattr(S, 'aim_angle', 0.0) if i==0 else 0.0, weapon_name=getattr(S, 'my_weapon', 'AK47') if i==0 else 'AK47', pressing=getattr(S, 'pressing', False) if i==0 else False)
         title = S.lobby_name if S.lobby_name else "LOCAL CO-OP"
         schemes = "  ".join(f"P{i+1} {SCHEMES[i][0]}" for i in range(len(S.local_players)))
         cx, cy = centroid(S.local_players)
@@ -1875,6 +2136,124 @@ def frame(S, events, dt, now):
                            f"{len(S.local_players)} rovers   X {cx:+.1f}  Y {cy:+.1f}", schemes],
                        "")
         draw_chat(S, now)
+
+
+    if S.state in (STATE_TEST, STATE_LOCAL):
+        # Draw bullets
+        if hasattr(S, "bullets"):
+            for b in S.bullets:
+                px, py = S.iso.world_px(b["wx"], b["wy"])
+                sx, sy = S.iso.to_screen(px, py)
+                sy -= b.get("z", 0)
+                if b["img"]:
+                    # Use stored screen angle so it points perfectly toward the mouse
+                    angle = math.degrees(-b.get("sa", 0))
+                    bw, bh = int(b["img"].get_width() * S.iso.scale * 0.91), int(b["img"].get_height() * S.iso.scale * 0.91)
+                    scaled_img = pygame.transform.scale(b["img"], (max(1, bw), max(1, bh)))
+                    rot_img = pygame.transform.rotate(scaled_img, angle)
+                    r = rot_img.get_rect(center=(int(sx), int(sy)))
+                    screen.blit(rot_img, r.topleft)
+                else:
+                    pygame.draw.circle(screen, (255, 255, 0), (int(sx), int(sy)), 3)
+                    
+        # Draw particles
+        if hasattr(S, "particles"):
+            surviving = []
+            for p in S.particles:
+                p["x"] += p["vx"] * dt
+                p["y"] += p["vy"] * dt
+                p["vy"] += 300 * dt  # Gravity
+                p["life"] -= dt
+                if p["life"] > 0:
+                    pygame.draw.rect(screen, p["color"], (int(p["x"]), int(p["y"]), 5, 5))
+                    surviving.append(p)
+            S.particles = surviving
+
+        # Draw dropped items
+        if hasattr(S, "dropped_items"):
+            if not hasattr(S, "drop_images"):
+                import os
+                S.drop_images = {}
+                paths = {
+                    "log": "items/material/log1.png",
+                    "coal": "items/ore/coal.png",
+                    "copper": "items/ore/copper_ore.png",
+                    "diamond": "items/ore/diamond.png",
+                    "gold": "items/ore/gold_ore.png",
+                    "iron": "items/ore/iron_ore.png"
+                }
+                for k, v in paths.items():
+                    try:
+                        img = pygame.image.load(os.path.join(S.ASSETS_DIR, v)).convert_alpha()
+                        S.drop_images[k] = pygame.transform.scale(img, (32, 32))
+                    except:
+                        S.drop_images[k] = pygame.Surface((32, 32))
+            vis = visible_cells(S)
+            for item in S.dropped_items:
+                item["cx"] += item.get("vx", 0) * dt
+                item["cy"] += item.get("vy", 0) * dt
+                item["z"] = item.get("z", 0.0) + item.get("vz", 0.0) * dt
+                item["vz"] = item.get("vz", 0.0) - 800 * dt
+                if item["z"] < 0:
+                    item["z"] = 0
+                    item["vz"] *= -0.4
+                    if item["vz"] < 40: item["vz"] = 0
+                    item["vx"] = item.get("vx", 0) * 0.5
+                    item["vy"] = item.get("vy", 0) * 0.5
+                    
+                # Culling
+                if (int(round(item["cx"])), int(round(item["cy"]))) not in vis:
+                    continue
+
+                ix, iy = item["cx"], item["cy"]
+                sx, sy = S.iso.to_screen(*S.iso.world_px(ix, iy))
+                sy -= S.iso.elev(ix, iy) + item.get("z", 0)
+                img = S.drop_images.get(item["type"])
+                if img:
+                    screen.blit(img, (int(sx - img.get_width()//2), int(sy - img.get_height()//2 - 10)))
+
+
+        # Draw Notepad UI
+        if not hasattr(S, "notepad_icon"):
+            import os
+            try:
+                raw_icon = pygame.image.load(os.path.join(S.ASSETS_DIR, "ui/notebook.png")).convert_alpha()
+                S.notepad_icon = pygame.transform.scale(raw_icon, (128, 128))
+            except:
+                S.notepad_icon = pygame.Surface((128, 128))
+                
+        if not hasattr(S, "compass_base"):
+            import os
+            try:
+                cb = pygame.image.load(os.path.join(S.ASSETS_DIR, "ui/compass/base.png")).convert_alpha()
+                cn = pygame.image.load(os.path.join(S.ASSETS_DIR, "ui/compass/needle.png")).convert_alpha()
+                cc = pygame.image.load(os.path.join(S.ASSETS_DIR, "ui/compass/cover.png")).convert_alpha()
+                cw, ch = int(cb.get_width() * 1.5), int(cb.get_height() * 1.5)
+                S.compass_base = pygame.transform.scale(cb, (cw, ch))
+                S.compass_needle = pygame.transform.scale(cn, (cw, ch))
+                S.compass_cover = pygame.transform.scale(cc, (cw, ch))
+            except:
+                S.compass_base = pygame.Surface((96, 96), pygame.SRCALPHA)
+                S.compass_needle = pygame.Surface((96, 96), pygame.SRCALPHA)
+                S.compass_cover = pygame.Surface((96, 96), pygame.SRCALPHA)
+                
+        # Draw icons
+        screen.blit(S.notepad_icon, (-10, cfg.HEIGHT - 118))
+        
+        # Draw compass
+        cw, ch = S.compass_base.get_size()
+        compass_x, compass_y = cfg.WIDTH - 20 - cw, cfg.HEIGHT - 20 - ch
+        screen.blit(S.compass_base, (compass_x, compass_y))
+        
+        # Rotate needle to point towards origin (0, 0)
+        target_wx, target_wy = S.iso.world_px(0, 0)
+        target_p = S.me if S.state == STATE_TEST else S.local_players[0]
+        player_wx, player_wy = S.iso.world_px(target_p[0], target_p[1])
+        angle = math.degrees(math.atan2(player_wy - target_wy, target_wx - player_wx)) - 90
+        rotated_needle = pygame.transform.rotate(S.compass_needle, angle)
+        nr = rotated_needle.get_rect(center=(compass_x + cw // 2, compass_y + ch // 2))
+        screen.blit(rotated_needle, nr.topleft)
+        screen.blit(S.compass_cover, (compass_x, compass_y))
 
     if S.state not in (STATE_TEST, STATE_LOCAL, STATE_MENU):
         draw_footer(S)
@@ -1932,3 +2311,4 @@ def frame(S, events, dt, now):
         draw_text(screen, f"FPS: {int(1.0/max(0.001, dt))}", S.font, 10, 10, cfg.GREEN)
 
     return running
+print('hot-reload triggered 25')
